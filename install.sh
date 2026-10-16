@@ -142,11 +142,22 @@ if [[ "${need_docker_install}" == true ]]; then
       if [[ ! -f /etc/apt/keyrings/docker.asc ]]; then
         # Mint/Pop use Ubuntu packages; their own Docker GPG URL may not exist
         if [[ "${OS_ID}" == "ubuntu" || "${OS_ID}" == "debian" ]]; then
-          $SUDO curl -fsSL "https://download.docker.com/linux/${OS_ID}/gpg" -o /etc/apt/keyrings/docker.asc
+          docker_key_url="https://download.docker.com/linux/${OS_ID}/gpg"
         else
-          $SUDO curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          docker_key_url="https://download.docker.com/linux/ubuntu/gpg"
         fi
-        $SUDO chmod a+r /etc/apt/keyrings/docker.asc
+        # Check the fingerprint before apt trusts the key for Docker packages.
+        docker_key_tmp="$(mktemp)"
+        curl -fsSL "${docker_key_url}" -o "${docker_key_tmp}" || die "Could not download Docker's signing key from ${docker_key_url}"
+        if ! docker_gpg_key_is_valid "${docker_key_tmp}"; then
+          rm -f "${docker_key_tmp}"
+          die "Docker's signing key from ${docker_key_url} does not match fingerprint ${DOCKER_GPG_FINGERPRINT}. Not installing."
+        fi
+        $SUDO install -m 0644 "${docker_key_tmp}" /etc/apt/keyrings/docker.asc
+        rm -f "${docker_key_tmp}"
+        ok "Verified Docker signing key (${DOCKER_GPG_FINGERPRINT})."
+      elif ! docker_gpg_key_is_valid /etc/apt/keyrings/docker.asc; then
+        die "/etc/apt/keyrings/docker.asc is not Docker's signing key (expected ${DOCKER_GPG_FINGERPRINT}). Inspect or remove it, then re-run."
       fi
       DOCKER_DISTRO="${OS_ID}"
       DOCKER_CODENAME="${VERSION_CODENAME:-stable}"

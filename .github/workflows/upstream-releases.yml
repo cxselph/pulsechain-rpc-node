@@ -1,0 +1,48 @@
+name: upstream releases
+
+# Weekly check for new go-pulse / prysm-pulse releases. Dependabot cannot
+# follow these GitLab images, so this opens an issue instead. Nothing is
+# bumped automatically: a pin changes only through a reviewed PR.
+on:
+  schedule:
+    - cron: "17 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Compare pins with the newest PulseChain releases
+        id: check
+        run: |
+          set +e
+          bash tests/check_upstream_releases.sh | tee report.txt
+          code=${PIPESTATUS[0]}
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+          if [ "${code}" -eq 2 ]; then exit 1; fi
+          exit 0
+      - name: Open an issue for a new release
+        if: steps.check.outputs.code == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="New PulseChain client release available"
+          if gh issue list --state open --search "in:title \"${title}\"" --json number --jq '.[0].number' | grep -q .; then
+            echo "An open issue already tracks this."
+            exit 0
+          fi
+          {
+            echo "The weekly check found a release newer than our digest pins:"
+            echo
+            echo '```'
+            cat report.txt
+            echo '```'
+            echo
+            echo "Read the release notes, wait until the release has been public for about 14 days unless it fixes a security issue, then bump the pin in docker-compose.yml and common.sh in a PR."
+          } > body.md
+          gh issue create --title "${title}" --body-file body.md
