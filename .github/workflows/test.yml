@@ -5,15 +5,18 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   scripts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: shellcheck
-        run: shellcheck -x common.sh install.sh start.sh stop.sh restart.sh logs.sh update.sh status.sh tests/test_common.sh tests/test_beacon_flags.sh tests/test_image_pins.sh
+        run: shellcheck -x common.sh install.sh start.sh stop.sh restart.sh logs.sh update.sh status.sh tests/test_common.sh tests/test_beacon_flags.sh tests/test_image_pins.sh tests/check_upstream_releases.sh
       - name: Helper and compose contract tests
         env:
           CI: "true"

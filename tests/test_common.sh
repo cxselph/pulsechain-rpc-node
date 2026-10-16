@@ -328,6 +328,41 @@ else
   fail ".env.example should document HTTP_ADDR and GETH_P2P_PORT"
 fi
 
+# Docker signing key check (install.sh refuses keys with another fingerprint)
+if command -v gpg >/dev/null 2>&1; then
+  printf 'not a key\n' > "$tmp"
+  if docker_gpg_key_is_valid "$tmp"; then
+    fail "docker_gpg_key_is_valid accepted a non-key file"
+  else
+    pass "docker_gpg_key_is_valid rejects a non-key file"
+  fi
+  if docker_gpg_key_is_valid /nonexistent/docker.asc; then
+    fail "docker_gpg_key_is_valid accepted a missing file"
+  else
+    pass "docker_gpg_key_is_valid rejects a missing file"
+  fi
+  if curl -fsSL --max-time 20 https://download.docker.com/linux/debian/gpg -o "$tmp" 2>/dev/null; then
+    if docker_gpg_key_is_valid "$tmp"; then
+      pass "Docker's published key matches DOCKER_GPG_FINGERPRINT"
+    else
+      fail "Docker's published key no longer matches DOCKER_GPG_FINGERPRINT (got '$(gpg_key_fingerprint "$tmp")')"
+    fi
+  elif [[ -n "${CI:-}${GITHUB_ACTIONS:-}" ]]; then
+    fail "could not download Docker's signing key"
+  else
+    echo "SKIP: could not download Docker's signing key"
+  fi
+elif [[ -n "${CI:-}${GITHUB_ACTIONS:-}" ]]; then
+  fail "gpg is required for the Docker key checks"
+else
+  echo "SKIP: gpg not installed; Docker key checks skipped"
+fi
+if grep -q 'docker_gpg_key_is_valid' "${ROOT}/install.sh"; then
+  pass "install.sh verifies Docker's signing key"
+else
+  fail "install.sh should verify Docker's signing key"
+fi
+
 if [[ "$FAILED" -ne 0 ]]; then
   echo "One or more common.sh / script checks failed." >&2
   exit 1

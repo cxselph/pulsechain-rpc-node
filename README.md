@@ -204,6 +204,19 @@ Chain data is stored under **`/blockchain`** and is retained when containers are
 
 ---
 
+## Dependency updates
+
+Nothing upstream reaches the node without review:
+
+- **Client images** are pinned by tag *and* digest in `docker-compose.yml` and `common.sh` (`tests/test_image_pins.sh` keeps them in sync with the registry). A weekly workflow (`.github/workflows/upstream-releases.yml`) runs `tests/check_upstream_releases.sh` and opens an issue when PulseChain publishes a newer release. Bump the pin in a PR after reading the release notes, preferably once the release has been public for about 14 days (sooner for a security fix).
+- **Avoid `./update.sh --latest`** on a node you rely on. It floats on unpinned `:latest` images, so whatever is published next is what you run.
+- **Docker Engine** comes from Docker's signed apt repo. `install.sh` checks the signing key's fingerprint (`DOCKER_GPG_FINGERPRINT` in `common.sh`) before trusting it, and stops if it doesn't match.
+- **GitHub Actions** are pinned by commit SHA. Dependabot proposes minor/patch updates weekly with a 14-day cooldown and never merges them itself.
+
+Don't switch any of these to floating tags or skip a verification step to get past an error. Fix the pin instead.
+
+---
+
 ## Localhost-only mode
 
 By default, **wallet** RPC binds to `0.0.0.0` (all interfaces). The Engine API (`--authrpc.addr=127.0.0.1`, port 8551) and beacon HTTP/gRPC (`BEACON_HTTP_HOST` / `BEACON_GRPC_HOST`, default `127.0.0.1`) are already host-only.
@@ -403,7 +416,8 @@ pulsechain-rpc-node/
 ├── tests/
 │   ├── test_common.sh
 │   ├── test_beacon_flags.sh
-│   └── test_image_pins.sh
+│   ├── test_image_pins.sh
+│   └── check_upstream_releases.sh  # weekly: newer PulseChain releases?
 ```
 
 ---

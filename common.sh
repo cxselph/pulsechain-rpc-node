@@ -9,6 +9,9 @@ BEACON_IMAGE_PINNED="registry.gitlab.com/pulsechaincom/prysm-pulse/beacon-chain:
 GETH_IMAGE_LATEST="registry.gitlab.com/pulsechaincom/go-pulse:latest"
 BEACON_IMAGE_LATEST="registry.gitlab.com/pulsechaincom/prysm-pulse/beacon-chain:latest"
 export GETH_IMAGE_LATEST BEACON_IMAGE_LATEST
+# Docker's apt signing key, as published at https://docs.docker.com/engine/install/debian/
+# (same key for the Ubuntu and Debian repos). install.sh refuses any other key.
+DOCKER_GPG_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
 GETH_CONTAINER="pulse-geth"
 BEACON_CONTAINER="pulse-beacon"
 
@@ -265,6 +268,20 @@ jwt_payload() {
 jwt_payload_is_valid() {
   local payload="$1"
   [[ "${#payload}" -eq 64 && "${payload}" =~ ^[0-9a-fA-F]{64}$ ]]
+}
+
+# Primary-key fingerprint of an armored or binary OpenPGP key file (needs gpg).
+gpg_key_fingerprint() {
+  gpg --batch --show-keys --with-colons "$1" 2>/dev/null \
+    | awk -F: '$1 == "fpr" { print $10; exit }'
+}
+
+# True only when the file holds Docker's apt signing key.
+docker_gpg_key_is_valid() {
+  local fpr=""
+  [[ -s "$1" ]] || return 1
+  fpr="$(gpg_key_fingerprint "$1")"
+  [[ -n "${fpr}" && "${fpr}" == "${DOCKER_GPG_FINGERPRINT}" ]]
 }
 
 confirm_yes() {
