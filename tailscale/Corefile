@@ -1,0 +1,20 @@
+# One-name DNS for Tailscale clients: <host> -> this node's Tailscale IP.
+# Tailscale split DNS sends only <host> here, so phones and laptops use the
+# same https://<host> away from home. Names outside <host> get REFUSED: this
+# is not a resolver and forwards nothing.
+# {$VAR} values come from the container environment (tailscale/.env).
+{$PUBLIC_HOSTNAME}:53 {
+	bind {$TS_IP}
+	# 1. The A record.
+	template IN A {
+		match "^{$PUBLIC_HOSTNAME}\.$"
+		answer "{{ .Name }} 60 IN A {$TS_IP}"
+	}
+	# 2. Other record types for the name (e.g. AAAA): exists, no data.
+	template ANY ANY {
+		match "^{$PUBLIC_HOSTNAME}\.$"
+		rcode NOERROR
+	}
+	# Names under it (www.<host>, ...) get SERVFAIL; nothing asks for them.
+	errors
+}

@@ -1,0 +1,28 @@
+# pulsechain-rpc-node — optional DNS answer for Tailscale clients (CoreDNS)
+# Answers exactly one name (PUBLIC_HOSTNAME -> this node's Tailscale IP) on the
+# Tailscale IP only. Set up with ./tailscale/install.sh.
+
+name: pulse-tailscale
+
+services:
+  coredns:
+    image: coredns/coredns:1.14.7@sha256:7efd3c635b03efd68c4e8398fc45f0d993d0e9ab016f72c1cefb0fd6d01aa286
+    container_name: pulse-coredns
+    network_mode: host
+    # Retries until tailscale0 has its IP after a reboot.
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    command: ["-conf", "/etc/coredns/Corefile"]
+    environment:
+      TS_IP: ${TS_IP:?run ./tailscale/install.sh}
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?run ./tailscale/install.sh}
+    volumes:
+      - ./Corefile:/etc/coredns/Corefile:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"

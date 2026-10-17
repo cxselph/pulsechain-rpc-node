@@ -295,6 +295,7 @@ A phone-friendly page, served through the HTTPS front end, that shows node healt
 | `docker-compose.yml` / `common.sh` | `./update.sh` (pinned images) |
 | `monitoring/` | the monitoring stack |
 | `proxy/` | the HTTPS front end |
+| `tailscale/` | the Tailscale DNS answer |
 | `control/` | the page itself |
 
 Changes that need `sudo` (the monitoring helper, the control systemd units) are reported as a manual SSH step. **Roll back** returns to the commit before the last update the same way.
@@ -312,6 +313,36 @@ Changes that need `sudo` (the monitoring helper, the control systemd units) are 
 ```
 
 If the control page isn't running, `https://<host>/` falls back to the static landing page. The wallet RPC on the same address is unaffected either way.
+
+---
+
+## Optional: away from home over Tailscale (same `https://<host>`)
+
+Reach the wallet RPC, the control page and Grafana from anywhere, at the **same address with the same certificate**. Nothing is port-forwarded and nothing goes through a third party's servers in clear text.
+
+| Piece | What it does |
+|---|---|
+| Tailscale on the node | Joins your tailnet as `<host>`'s first label (e.g. `rpc`). Installed from Tailscale's signed apt repo, with the key fingerprint checked and the version pinned (`TAILSCALE_VERSION`). |
+| One-name DNS (CoreDNS) | Answers **only** `<host>` → the node's Tailscale IP, and only on that IP. Everything else is REFUSED: it's not a resolver. |
+| Tailscale split DNS | One admin-console setting: "ask the node about `<host>`". Away from home, devices resolve `<host>` to the Tailscale IP. At home without Tailscale, your router answers as before. |
+
+```bash
+./tailscale/install.sh     # after ./proxy/install.sh; the first run prints a link to log the node in
+./tailscale/status.sh
+```
+
+Then, in the Tailscale admin console:
+1. **Machines** → the node → **Disable key expiry**.
+2. **DNS** → Nameservers → **Add nameserver → Custom**: the node's Tailscale IP, with **Restrict to domain** set to `<host>`.
+
+**Firewall.**
+- The node runs `tailscale up --netfilter-mode=off`. Tailscale's default iptables rules accept *all* tailnet traffic ahead of UFW, and this keeps UFW in charge.
+- The installer opens only 443, 80 and 53 on `tailscale0`, plus Tailscale's own WireGuard port (41641/udp) for direct connections. SSH stays reachable through the existing OpenSSH rule.
+- Plain `:8545` is **not** reachable over the tailnet, so remote wallets use `https://<host>`.
+- `--accept-dns=false` keeps the node's own DNS unchanged.
+- Never use Tailscale Funnel: it would publish the node to the internet.
+
+**Updates.** Tailscale updates arrive through apt like other packages. The control page counts them under Debian updates, and `unattended-upgrades` doesn't install third-party packages on its own.
 
 ---
 
@@ -538,10 +569,12 @@ pulsechain-rpc-node/
 │   ├── check_upstream_releases.sh  # weekly: newer PulseChain releases?
 │   ├── test_monitoring.sh
 │   ├── test_proxy.sh
-│   └── test_control.sh
+│   ├── test_control.sh
+│   └── test_tailscale.sh
 ├── monitoring/               # optional Grafana + Prometheus stack (see above)
 ├── proxy/                    # optional HTTPS front end (Caddy)
 ├── control/                  # optional control page + node-control helper
+├── tailscale/                # optional access over Tailscale (one-name DNS)
 ```
 
 ---

@@ -129,7 +129,7 @@ def pins(common_sh_text):
 
 def classify(paths):
     """Which parts of the install a set of changed paths touches."""
-    areas = {"node": False, "monitoring": False, "proxy": False, "control": False}
+    areas = {"node": False, "monitoring": False, "proxy": False, "control": False, "tailscale": False}
     manual = []
     for p in paths:
         if p in ("docker-compose.yml", "common.sh"):
@@ -140,6 +140,10 @@ def classify(paths):
             areas["monitoring"] = True
         elif p.startswith("proxy/"):
             areas["proxy"] = True
+        elif p == "tailscale/install.sh":
+            manual.append("./tailscale/install.sh")
+        elif p.startswith("tailscale/"):
+            areas["tailscale"] = True
         elif p.startswith("control/systemd/") or p == "control/install.sh":
             manual.append("./control/install.sh")
         elif p.startswith("control/") and p != "control/node-control.py":
@@ -272,6 +276,11 @@ def followups(changed_paths, log):
         log.append("$ proxy pull + restart\n" + out)
         ok &= rc == 0
         done.append("HTTPS front end restarted" if rc == 0 else "HTTPS front end restart FAILED")
+    if areas["tailscale"] and os.path.exists(os.path.join(REPO, "tailscale/.env")):
+        rc, out = run(["bash", "-c", "source tailscale/lib.sh && ts_compose pull -q && ./tailscale/restart.sh"], timeout=300)
+        log.append("$ tailscale DNS pull + restart\n" + out)
+        ok &= rc == 0
+        done.append("Tailscale DNS answer restarted" if rc == 0 else "Tailscale DNS restart FAILED")
     if areas["control"] and os.path.exists(os.path.join(REPO, "control/.env")):
         # Last: this restarts the control page itself.
         rc, out = run(["./control/restart.sh"], timeout=900)

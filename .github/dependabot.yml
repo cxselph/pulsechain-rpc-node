@@ -62,3 +62,13 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "docker-compose"
+    directory: "/tailscale"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 14
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
