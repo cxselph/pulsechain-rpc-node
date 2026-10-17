@@ -16,7 +16,7 @@ GETH_CONTAINER="pulse-geth"
 BEACON_CONTAINER="pulse-beacon"
 
 # Env keys interpolated by docker-compose.yml / passed through sudo.
-COMPOSE_ENV_KEYS="DATA_DIR,HTTP_PORT,WS_PORT,HTTP_ADDR,WS_ADDR,BEACON_HTTP_PORT,BEACON_GRPC_PORT,BEACON_HTTP_HOST,BEACON_GRPC_HOST,GETH_IMAGE,BEACON_IMAGE,GETH_CACHE,GETH_P2P_PORT,BEACON_P2P_TCP_PORT,BEACON_P2P_UDP_PORT"
+COMPOSE_ENV_KEYS="DATA_DIR,HTTP_PORT,WS_PORT,HTTP_ADDR,WS_ADDR,BEACON_HTTP_PORT,BEACON_GRPC_PORT,BEACON_HTTP_HOST,BEACON_GRPC_HOST,GETH_IMAGE,BEACON_IMAGE,GETH_CACHE,GETH_P2P_PORT,BEACON_P2P_TCP_PORT,BEACON_P2P_UDP_PORT,GETH_METRICS_PORT,BEACON_METRICS_PORT"
 
 _trim() {
   local s="$1"
@@ -113,11 +113,14 @@ load_dotenv "${_COMMON_DIR}/.env"
 [[ -n "${GETH_P2P_PORT:-}" ]] || GETH_P2P_PORT=30303
 [[ -n "${BEACON_P2P_TCP_PORT:-}" ]] || BEACON_P2P_TCP_PORT=13000
 [[ -n "${BEACON_P2P_UDP_PORT:-}" ]] || BEACON_P2P_UDP_PORT=12000
+[[ -n "${GETH_METRICS_PORT:-}" ]] || GETH_METRICS_PORT=6060
+[[ -n "${BEACON_METRICS_PORT:-}" ]] || BEACON_METRICS_PORT=8080
 [[ -n "${GETH_IMAGE:-}" ]] || GETH_IMAGE="${GETH_IMAGE_PINNED}"
 [[ -n "${BEACON_IMAGE:-}" ]] || BEACON_IMAGE="${BEACON_IMAGE_PINNED}"
 export DATA_DIR HTTP_PORT WS_PORT HTTP_ADDR WS_ADDR BEACON_HTTP_PORT BEACON_GRPC_PORT
 export BEACON_HTTP_HOST BEACON_GRPC_HOST GETH_CACHE GETH_P2P_PORT
 export BEACON_P2P_TCP_PORT BEACON_P2P_UDP_PORT GETH_IMAGE BEACON_IMAGE
+export GETH_METRICS_PORT BEACON_METRICS_PORT
 
 wallet_rpc_is_localhost() {
   case "${HTTP_ADDR}" in
@@ -282,6 +285,61 @@ docker_gpg_key_is_valid() {
   [[ -s "$1" ]] || return 1
   fpr="$(gpg_key_fingerprint "$1")"
   [[ -n "${fpr}" && "${fpr}" == "${DOCKER_GPG_FINGERPRINT}" ]]
+}
+
+# --- Docker shutdown / mount safeguards ------------------------------------
+# Out of the box, systemd kills dockerd after 90 s and dockerd stops containers
+# after 15 s on shutdown, which can cut go-pulse off mid-write. And if the chain
+# disk fails to mount, Docker would start the node against an empty directory.
+DOCKER_DROPIN_NAME="pulsechain-rpc-node.conf"
+DOCKER_STOP_TIMEOUT_SEC=390      # systemd -> dockerd (must exceed the next line)
+DOCKER_SHUTDOWN_TIMEOUT_SEC=300  # dockerd -> containers (= compose stop_grace_period 5m)
+
+docker_dropin_content() {
+  local data_dir="$1"
+  printf '%s\n' \
+    "# Managed by pulsechain-rpc-node install.sh" \
+    "[Unit]" \
+    "# Never start Docker (and the node) without the chain data mounted." \
+    "RequiresMountsFor=${data_dir}" \
+    "" \
+    "[Service]" \
+    "# Leave time for containers to finish their stop_grace_period on shutdown." \
+    "TimeoutStopSec=${DOCKER_STOP_TIMEOUT_SEC}"
+}
+
+# install_docker_safeguards <root-prefix> <data-dir>
+# Root prefix is "" on a real host (tests pass a temp dir). Uses $SUDO if set.
+# Sets DOCKER_SAFEGUARDS_CHANGED=1 when a file was written, and
+# DOCKER_DAEMON_JSON_NEEDS_EDIT=1 when an existing daemon.json lacks
+# shutdown-timeout (it is never rewritten, to keep other settings intact).
+# shellcheck disable=SC2034  # results are read by install.sh
+install_docker_safeguards() {
+  local root="$1" data_dir="$2"
+  local sudo_cmd="${SUDO:-}"
+  local dropin_dir="${root}/etc/systemd/system/docker.service.d"
+  local dropin="${dropin_dir}/${DOCKER_DROPIN_NAME}"
+  local daemon_json="${root}/etc/docker/daemon.json"
+  local want have
+  DOCKER_SAFEGUARDS_CHANGED=0
+  DOCKER_DAEMON_JSON_NEEDS_EDIT=0
+
+  want="$(docker_dropin_content "${data_dir}")"
+  have="$(${sudo_cmd} cat "${dropin}" 2>/dev/null || true)"
+  if [[ "${have}" != "${want}" ]]; then
+    ${sudo_cmd} mkdir -p "${dropin_dir}"
+    printf '%s\n' "${want}" | ${sudo_cmd} tee "${dropin}" >/dev/null
+    DOCKER_SAFEGUARDS_CHANGED=1
+  fi
+
+  if ! ${sudo_cmd} test -e "${daemon_json}"; then
+    ${sudo_cmd} mkdir -p "$(dirname "${daemon_json}")"
+    printf '{\n  "shutdown-timeout": %s\n}\n' "${DOCKER_SHUTDOWN_TIMEOUT_SEC}" \
+      | ${sudo_cmd} tee "${daemon_json}" >/dev/null
+    DOCKER_SAFEGUARDS_CHANGED=1
+  elif ! ${sudo_cmd} grep -q '"shutdown-timeout"' "${daemon_json}"; then
+    DOCKER_DAEMON_JSON_NEEDS_EDIT=1
+  fi
 }
 
 confirm_yes() {

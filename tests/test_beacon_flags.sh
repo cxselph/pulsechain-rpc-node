@@ -317,6 +317,26 @@ if [[ -f "$README" ]]; then
   fi
 fi
 
+# --- Metrics endpoints stay on localhost ---
+if grep -E '^\s+-\s+--metrics\.addr=127\.0\.0\.1$' "$COMPOSE" >/dev/null \
+   && grep -E '^\s+-\s+--metrics\.port=\$\{GETH_METRICS_PORT:-6060\}$' "$COMPOSE" >/dev/null \
+   && grep -E '^\s+-\s+--metrics$' "$COMPOSE" >/dev/null; then
+  pass "go-pulse metrics enabled on 127.0.0.1:\${GETH_METRICS_PORT:-6060}"
+else
+  fail "go-pulse needs --metrics, --metrics.addr=127.0.0.1 and --metrics.port=\${GETH_METRICS_PORT:-6060}"
+fi
+if grep -E '^\s+-\s+--monitoring-host=127\.0\.0\.1$' "$COMPOSE" >/dev/null \
+   && grep -E '^\s+-\s+--monitoring-port=\$\{BEACON_METRICS_PORT:-8080\}$' "$COMPOSE" >/dev/null; then
+  pass "prysm metrics pinned to 127.0.0.1:\${BEACON_METRICS_PORT:-8080}"
+else
+  fail "prysm needs --monitoring-host=127.0.0.1 and --monitoring-port=\${BEACON_METRICS_PORT:-8080}"
+fi
+if grep -E '^\s+-\s+--(metrics\.addr|monitoring-host)=(0\.0\.0\.0|\$)' "$COMPOSE" >/dev/null; then
+  fail "metrics must not bind to 0.0.0.0 or a variable host"
+else
+  pass "no metrics endpoint bound beyond localhost"
+fi
+
 if [[ "$FAILED" -ne 0 ]]; then
   echo "One or more beacon/compose checks failed." >&2
   exit 1

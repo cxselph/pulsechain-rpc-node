@@ -363,6 +363,54 @@ else
   fail "install.sh should verify Docker's signing key"
 fi
 
+# Docker shutdown/mount safeguards (written under a temp root, no sudo)
+sg_root="$(mktemp -d)"
+(
+  # shellcheck disable=SC2034  # read by install_docker_safeguards
+  SUDO=""
+  install_docker_safeguards "${sg_root}" /blockchain
+  echo "first=${DOCKER_SAFEGUARDS_CHANGED} needs_edit=${DOCKER_DAEMON_JSON_NEEDS_EDIT}"
+  install_docker_safeguards "${sg_root}" /blockchain
+  echo "second=${DOCKER_SAFEGUARDS_CHANGED}"
+) > "${sg_root}/out"
+dropin="${sg_root}/etc/systemd/system/docker.service.d/${DOCKER_DROPIN_NAME}"
+if grep -qx 'RequiresMountsFor=/blockchain' "${dropin}" 2>/dev/null \
+   && grep -qx "TimeoutStopSec=${DOCKER_STOP_TIMEOUT_SEC}" "${dropin}" \
+   && grep -q "\"shutdown-timeout\": ${DOCKER_SHUTDOWN_TIMEOUT_SEC}" "${sg_root}/etc/docker/daemon.json"; then
+  pass "install_docker_safeguards writes the drop-in and daemon.json"
+else
+  fail "install_docker_safeguards did not write the expected files"
+fi
+if grep -qx 'first=1 needs_edit=0' "${sg_root}/out" && grep -qx 'second=0' "${sg_root}/out"; then
+  pass "install_docker_safeguards is idempotent (second run changes nothing)"
+else
+  fail "install_docker_safeguards change tracking wrong: $(tr '\n' ' ' < "${sg_root}/out")"
+fi
+if (( DOCKER_STOP_TIMEOUT_SEC > DOCKER_SHUTDOWN_TIMEOUT_SEC )); then
+  pass "systemd stop timeout exceeds Docker's container shutdown timeout"
+else
+  fail "DOCKER_STOP_TIMEOUT_SEC must exceed DOCKER_SHUTDOWN_TIMEOUT_SEC"
+fi
+printf '{ "log-driver": "local" }\n' > "${sg_root}/etc/docker/daemon.json"
+(
+  # shellcheck disable=SC2034  # read by install_docker_safeguards
+  SUDO=""
+  install_docker_safeguards "${sg_root}" /blockchain
+  echo "needs_edit=${DOCKER_DAEMON_JSON_NEEDS_EDIT}"
+) > "${sg_root}/out2"
+if grep -qx 'needs_edit=1' "${sg_root}/out2" && grep -q '"log-driver": "local"' "${sg_root}/etc/docker/daemon.json" \
+   && ! grep -q 'shutdown-timeout' "${sg_root}/etc/docker/daemon.json"; then
+  pass "an existing daemon.json is left untouched and flagged"
+else
+  fail "existing daemon.json must not be rewritten (and should be flagged)"
+fi
+rm -rf "${sg_root}"
+if grep -q 'install_docker_safeguards ""' "${ROOT}/install.sh"; then
+  pass "install.sh applies the Docker safeguards"
+else
+  fail "install.sh should call install_docker_safeguards"
+fi
+
 # install.sh must find sbin tools (ufw) when run as a normal user on Debian
 if (
   PATH=/usr/bin:/bin

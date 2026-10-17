@@ -212,6 +212,27 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
 fi
 
+# Clean shutdowns + never start without the chain disk (see common.sh).
+if command -v systemctl >/dev/null 2>&1; then
+  install_docker_safeguards "" "${DATA_DIR}"
+  if [[ "${DOCKER_DAEMON_JSON_NEEDS_EDIT}" -eq 1 ]]; then
+    warn "/etc/docker/daemon.json exists without \"shutdown-timeout\"."
+    warn "Add  \"shutdown-timeout\": ${DOCKER_SHUTDOWN_TIMEOUT_SEC}  to it, then: sudo systemctl restart docker"
+    warn "Without it, Docker gives go-pulse only 15 s to stop on shutdown."
+  fi
+  if [[ "${DOCKER_SAFEGUARDS_CHANGED}" -eq 1 ]]; then
+    info "Applying Docker shutdown/mount safeguards (restarts Docker if it is running)..."
+    $SUDO systemctl daemon-reload
+    if $SUDO systemctl is-active --quiet docker 2>/dev/null; then
+      $SUDO systemctl restart docker
+      wait_for_docker || die "Docker did not come back after applying safeguards. Try: sudo systemctl status docker"
+    fi
+    ok "Docker waits for ${DATA_DIR} and allows ${DOCKER_SHUTDOWN_TIMEOUT_SEC} s for a clean node shutdown."
+  else
+    ok "Docker shutdown/mount safeguards already in place."
+  fi
+fi
+
 # Ensure openssl for JWT generation
 if ! command -v openssl >/dev/null 2>&1; then
   info "Installing openssl..."
@@ -347,7 +368,7 @@ fi
 # ---------------------------------------------------------------------------
 # 7. Port conflict pre-check (host networking shares the host's ports)
 # ---------------------------------------------------------------------------
-PORTS_TO_CHECK=("${HTTP_PORT}" "${WS_PORT}" "${BEACON_HTTP_PORT}" "${BEACON_GRPC_PORT}" 8551 "${GETH_P2P_PORT}" "${BEACON_P2P_TCP_PORT}" "${BEACON_P2P_UDP_PORT}")
+PORTS_TO_CHECK=("${HTTP_PORT}" "${WS_PORT}" "${BEACON_HTTP_PORT}" "${BEACON_GRPC_PORT}" 8551 "${GETH_P2P_PORT}" "${BEACON_P2P_TCP_PORT}" "${BEACON_P2P_UDP_PORT}" "${GETH_METRICS_PORT}" "${BEACON_METRICS_PORT}")
 if our_stack_running; then
   ok "Existing ${GETH_CONTAINER}/${BEACON_CONTAINER} detected — re-run will refresh this stack (not a foreign port conflict)."
 else
