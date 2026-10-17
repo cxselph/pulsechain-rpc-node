@@ -25,14 +25,21 @@ for ref in "${images[@]}"; do
   fi
   repo="${ref%%:*}"; rest="${ref#*:}"; tag="${rest%%@*}"; want="${ref##*@}"
   if got="$(python3 - "${repo}" "${tag}" <<'PY' 2>/dev/null
-import json, sys, urllib.request
+import json, sys, time, urllib.request
 repo, tag = sys.argv[1], sys.argv[2]
-tok = json.load(urllib.request.urlopen(
-    f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull", timeout=20))["token"]
-req = urllib.request.Request(f"https://registry-1.docker.io/v2/{repo}/manifests/{tag}", method="HEAD", headers={
-    "Authorization": f"Bearer {tok}",
-    "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json"})
-print(urllib.request.urlopen(req, timeout=20).headers["Docker-Content-Digest"])
+def lookup():
+    tok = json.load(urllib.request.urlopen(
+        f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull", timeout=20))["token"]
+    req = urllib.request.Request(f"https://registry-1.docker.io/v2/{repo}/manifests/{tag}", method="HEAD", headers={
+        "Authorization": f"Bearer {tok}",
+        "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json"})
+    return urllib.request.urlopen(req, timeout=20).headers["Docker-Content-Digest"]
+for attempt in range(4):  # registries sometimes answer 5xx for a moment
+    try:
+        print(lookup()); break
+    except Exception:
+        if attempt == 3: raise
+        time.sleep(5 * (attempt + 1))
 PY
 )"; then
     if [[ "${got}" == "${want}" ]]; then pass "registry digest matches ${repo}:${tag}"; else fail "${repo}:${tag} registry digest ${got} != pin ${want}"; fi

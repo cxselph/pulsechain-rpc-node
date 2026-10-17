@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+{% if message %}<p class="msg {{ message[0] }}">{{ message[1] }}</p>{% endif %}
+<div id="status" data-src="{{ url_for('fragment_status') }}">
+{% include "_status.html" %}
+</div>
+{% endblock %}

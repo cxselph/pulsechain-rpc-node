@@ -30,22 +30,34 @@ registry_digest() {
   local repo="$1"
   local tag="$2"
   python3 - "$repo" "$tag" <<'PY'
-import json, sys, urllib.parse, urllib.request
+import json, sys, time, urllib.parse, urllib.request
 
 repo, tag = sys.argv[1], sys.argv[2]
 scope = f"repository:{repo}:pull"
 auth = "https://gitlab.com/jwt/auth?service=container_registry&scope=" + urllib.parse.quote(scope)
-with urllib.request.urlopen(auth, timeout=20) as r:
-    token = json.load(r)["token"]
-req = urllib.request.Request(
-    f"https://registry.gitlab.com/v2/{repo}/manifests/{tag}",
-    headers={
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json",
-    },
-)
-with urllib.request.urlopen(req, timeout=20) as r:
-    digest = r.headers.get("Docker-Content-Digest")
+
+def lookup():
+    with urllib.request.urlopen(auth, timeout=20) as r:
+        token = json.load(r)["token"]
+    req = urllib.request.Request(
+        f"https://registry.gitlab.com/v2/{repo}/manifests/{tag}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return r.headers.get("Docker-Content-Digest")
+
+# The registry sometimes answers 502/503 for a moment; retry before failing.
+for attempt in range(4):
+    try:
+        digest = lookup()
+        break
+    except Exception:
+        if attempt == 3:
+            raise
+        time.sleep(5 * (attempt + 1))
 if not digest:
     raise SystemExit("missing Docker-Content-Digest")
 print(digest)

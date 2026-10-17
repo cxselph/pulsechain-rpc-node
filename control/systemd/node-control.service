@@ -1,0 +1,20 @@
+[Unit]
+Description=Carry out control page requests (pulsechain-rpc-node)
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@REPO@
+ExecStart=/usr/bin/python3 @REPO@/control/node-control.py process
+# An update can pull images and wait for go-pulse's 5 min clean shutdown.
+TimeoutStartSec=45min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes

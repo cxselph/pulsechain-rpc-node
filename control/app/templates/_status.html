@@ -1,0 +1,120 @@
+{% set el, cl, h = s.el, s.cl, (s.helper or {}) %}
+{% set repo = h.get('repo', {}) %}
+{% set busy = s.running or s.queued %}
+<div class="banner {{ s.health[0] }}" data-busy="{{ 1 if busy else 0 }}">
+  <strong>{{ {'green': 'Healthy', 'yellow': 'Attention', 'red': 'Problem'}[s.health[0]] }}</strong>
+  <span>{{ s.health[1] }}</span>
+</div>
+{% if s.running %}
+<p class="msg running">Running: {{ s.running.label }} — started {{ s.running.started | ago }}</p>
+{% elif s.queued %}
+<p class="msg running">Starting the requested action…</p>
+{% endif %}
+
+<div class="grid">
+  <section class="card">
+    <h2>Sync</h2>
+    {% if not el.up %}<p class="bad">go-pulse not answering</p>
+    {% else %}
+    <p class="big">{% if el.syncing %}Syncing{% else %}<span class="good">Synced</span>{% endif %}</p>
+    <dl>
+      <dt>Block</dt><dd>{{ el.current | num }}{% if el.syncing %} of {{ el.highest | num }}{% endif %}</dd>
+      {% if el.syncing %}
+      <dt>Blocks</dt><dd><progress max="100" value="{{ '%.1f' % el.get('percent', 0) }}"></progress> {{ '%.1f' % el.get('percent', 0) }}%</dd>
+      {% if s.eta_hours is defined %}<dt>Block ETA</dt><dd>~{{ '%.0f' % s.eta_hours if s.eta_hours >= 1 else '<1' }} h at {{ s.blocks_per_min | num }}/min</dd>{% endif %}
+      {% if el.accounts %}<dt>State</dt><dd>{{ el.accounts | num }} accounts{% if el.healed %}, {{ el.healed | num }} healed nodes{% endif %}</dd>{% endif %}
+      {% endif %}
+    </dl>
+    {% if el.syncing %}<p class="hint">Don't send transactions until this says Synced.</p>{% endif %}
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Network</h2>
+    <dl>
+      <dt>go-pulse peers</dt><dd class="{{ 'bad' if el.up and el.peers < 5 }}">{{ el.peers | num if el.up else '—' }}</dd>
+      <dt>Prysm peers</dt><dd class="{{ 'bad' if cl.up and cl.peers < 5 }}">{{ cl.peers | num if cl.up else '—' }}</dd>
+      <dt>Beacon</dt><dd>{% if not cl.up %}<span class="bad">not answering</span>{% elif cl.syncing %}syncing{% else %}synced{% endif %}{% if cl.up %}, slot {{ cl.head_slot | num }}{% endif %}</dd>
+      <dt>Engine link</dt><dd>{% if not cl.up %}—{% elif cl.el_offline %}<span title="Prysm-Pulse reports this during the initial sync even when connected">reported offline</span>{% else %}connected{% endif %}</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Disk</h2>
+    {% if s.disk %}
+    <progress class="{{ 'warn' if s.disk.used_pct >= 85 }}" max="100" value="{{ '%.1f' % s.disk.used_pct }}"></progress>
+    <p>{{ '%.0f' % s.disk.used_pct }}% used · {{ s.disk.free | bytes }} free of {{ s.disk.total | bytes }}</p>
+    {% else %}<p class="hint">Not available</p>{% endif %}
+    {% set sysinfo = h.get('system', {}) %}
+    {% if sysinfo %}
+    <dl>
+      <dt>Debian updates</dt><dd>{{ sysinfo.get('apt_upgradable', '—') }} pending{% if sysinfo.get('apt_security') %} ({{ sysinfo.apt_security }} security){% endif %}</dd>
+      {% if sysinfo.get('reboot_required') %}<dt>Reboot</dt><dd class="bad">required (over SSH: sudo reboot)</dd>{% endif %}
+    </dl>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Version</h2>
+    {% if not h %}<p class="bad">node-control helper not reporting</p>
+    {% else %}
+    <dl>
+      <dt>go-pulse</dt><dd>{{ repo.get('pins', {}).get('geth', '—') }}</dd>
+      <dt>Prysm</dt><dd>{{ repo.get('pins', {}).get('beacon', '—') }}</dd>
+      <dt>Fork</dt><dd><code>{{ repo.get('head_short') }}</code> {{ repo.get('head_date') }}</dd>
+      <dt>Checked</dt><dd>{{ repo.get('last_fetch') | ago }}</dd>
+    </dl>
+    {% if repo.get('behind') %}
+    <p class="update"><strong>{{ repo.behind }} update{{ 's' if repo.behind != 1 }} available</strong></p>
+    <ul class="commits">{% for c in repo.get('incoming', []) %}<li><code>{{ c.sha }}</code> {{ c.subject }}</li>{% endfor %}</ul>
+    {% for k, v in repo.get('incoming_pins', {}).items() if v != repo.get('pins', {}).get(k) %}
+    <p class="hint">{{ 'go-pulse' if k == 'geth' else 'Prysm' }}: {{ repo.get('pins', {}).get(k) }} → <strong>{{ v }}</strong></p>
+    {% endfor %}
+    {% if repo.get('incoming_manual') %}<p class="hint">Afterwards, over SSH: {% for m in repo.incoming_manual %}<code>{{ m }}</code> {% endfor %}</p>{% endif %}
+    {% for r in repo.get('blocked_reasons', []) %}<p class="bad">Can't apply: {{ r }}</p>{% endfor %}
+    {% else %}
+    <p class="good">Up to date</p>
+    {% endif %}
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <h2>Actions</h2>
+  <div class="actions">
+    {% set show = ['check-updates'] %}
+    {% if repo.get('behind') and repo.get('can_apply') %}{% set show = show + ['apply-update'] %}{% endif %}
+    {% if repo.get('rollback_to') %}{% set show = show + ['rollback'] %}{% endif %}
+    {% set show = show + ['restart-node', 'restart-geth', 'restart-beacon'] %}
+    {% for name in show %}
+    <form method="post" action="{{ url_for('action', name=name) }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="{{ 'primary' if name == 'apply-update' else '' }}" {{ 'disabled' if busy or not h }}>{{ ACTIONS[name][0] }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% if not h %}<p class="hint">Buttons are off until the node-control helper reports (./control/status.sh).</p>{% endif %}
+</section>
+
+<div class="grid">
+  <section class="card">
+    <h2>Recent actions</h2>
+    {% if s.history %}
+    <ul class="history">
+      {% for e in s.history %}
+      <li class="{{ 'ok' if e.ok else 'fail' }}"><span class="dot"></span><div><strong>{{ e.label }}</strong> · {{ e.finished | ago }}<br><span class="hint">{{ e.summary }}</span> <a href="{{ url_for('log', rid=e.id) }}">log</a></div></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="hint">None yet.</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Containers</h2>
+    <ul class="containers">
+      {% for name, c in h.get('containers', {}).items() if c.status != 'not installed' %}
+      <li><span class="{{ 'good' if c.running else 'bad' }}">●</span> {{ name | replace('pulse-', '') }} <span class="hint">{{ c.health or c.status }}{% if c.restart_count %}, {{ c.restart_count }} restarts{% endif %} · up since {{ c.started_at | ago | replace(' ago', '') }}</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+<p class="hint foot">Updated {{ s.now[11:19] }} UTC · refreshes on its own</p>

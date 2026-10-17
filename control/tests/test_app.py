@@ -1,0 +1,187 @@
+"""Control page web app: auth, CSRF, rate limit, actions -> request files."""
+import json
+import os
+import re
+import stat
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "app"))
+
+import control  # noqa: E402
+from werkzeug.security import generate_password_hash  # noqa: E402
+
+PASSWORD = "correct horse battery staple"
+BASE = "https://rpc.home"
+
+
+def fake_status(**over):
+    s = {
+        "now": "2026-10-17T20:00:00+00:00",
+        "el": {"up": True, "syncing": True, "current": 100, "highest": 200, "peers": 30, "percent": 50.0},
+        "cl": {"up": True, "syncing": False, "el_offline": True, "head_slot": 7, "distance": 0, "peers": 20},
+        "disk": {"total": 2_500_000_000_000, "free": 2_000_000_000_000, "used_pct": 20.0},
+        "helper": {"repo": {"behind": 0, "can_apply": False, "pins": {"geth": "v3.3.0", "beacon": "v2.3.0"},
+                            "head_short": "abc1234", "rollback_to": None, "blocked_reasons": []},
+                   "containers": {"pulse-geth": {"running": True, "status": "running"}}, "system": {}},
+        "running": None, "queued": 0, "history": [],
+    }
+    for k, v in over.items():
+        s[k] = v
+    s["health"] = control.health(s)
+    return s
+
+
+class AppTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.state = os.path.join(self.tmp, "state"); os.makedirs(os.path.join(self.state, "logs"))
+        self.req = os.path.join(self.tmp, "requests"); os.makedirs(self.req)
+        control.STATE_DIR, control.REQ_DIR = self.state, self.req
+        self.status = fake_status()
+        self._orig = control.collect_status
+        control.collect_status = lambda: self.status
+        self.app = control.create_app({
+            "TESTING": True, "SECRET_KEY": "test-secret",
+            "PASSWORD_HASH": generate_password_hash(PASSWORD), "TRUSTED_HOSTS": ["rpc.home"],
+        })
+        self.c = self.app.test_client()
+
+    def tearDown(self):
+        control.collect_status = self._orig
+
+    def csrf(self, path="/login"):
+        html = self.c.get(path, base_url=BASE).get_data(as_text=True)
+        return re.search(r'name="csrf" value="([^"]+)"', html).group(1)
+
+    def login(self, pw=PASSWORD):
+        return self.c.post("/login", base_url=BASE, data={"csrf": self.csrf(), "password": pw})
+
+    def requests(self):
+        return [f for f in os.listdir(self.req) if f.endswith(".json")]
+
+    # --- auth -----------------------------------------------------------------
+    def test_pages_require_login(self):
+        r = self.c.get("/", base_url=BASE)
+        self.assertEqual(r.status_code, 302); self.assertIn("/login", r.location)
+        self.assertEqual(self.c.get("/api/status", base_url=BASE).status_code, 401)
+        self.assertEqual(self.c.get("/fragment/status", base_url=BASE).status_code, 401)
+
+    def test_login_post_needs_csrf(self):
+        r = self.c.post("/login", base_url=BASE, data={"password": PASSWORD})
+        self.assertEqual(r.status_code, 400)
+
+    def test_wrong_then_right_password_and_cookie_flags(self):
+        self.assertEqual(self.login("nope").status_code, 401)
+        r = self.login()
+        self.assertEqual(r.status_code, 302)
+        cookie = [h for h in r.headers.getlist("Set-Cookie") if h.startswith("__Host-control=")][-1]
+        for flag in ("Secure", "HttpOnly", "SameSite=Strict", "Path=/"):
+            self.assertIn(flag, cookie)
+        self.assertNotIn("Domain=", cookie)
+        self.assertEqual(self.c.get("/", base_url=BASE).status_code, 200)
+
+    def test_rate_limit_blocks_even_the_right_password(self):
+        for _ in range(control.LOGIN_MAX_PER_IP):
+            self.assertEqual(self.login("wrong").status_code, 401)
+        self.assertEqual(self.login().status_code, 429)
+
+    def test_no_password_configured(self):
+        self.app.config["PASSWORD_HASH"] = ""
+        r = self.login()
+        self.assertEqual(r.status_code, 401)
+        self.assertIn("set-password.sh", r.get_data(as_text=True))
+
+    def test_untrusted_host_rejected(self):
+        self.assertEqual(self.c.get("/login", base_url="https://evil.example").status_code, 400)
+
+    def test_logout_needs_csrf(self):
+        self.login()
+        self.assertEqual(self.c.post("/logout", base_url=BASE).status_code, 400)
+
+    def test_security_headers(self):
+        r = self.c.get("/login", base_url=BASE)
+        self.assertIn("script-src 'self'", r.headers["Content-Security-Policy"])
+        self.assertNotIn("unsafe-inline", r.headers["Content-Security-Policy"])
+        self.assertEqual(r.headers["X-Frame-Options"], "DENY")
+        self.assertEqual(r.headers["Cache-Control"], "no-store")
+
+    # --- dashboard + actions ---------------------------------------------------
+    def test_dashboard_renders_status(self):
+        self.login()
+        html = self.c.get("/", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Syncing", html); self.assertIn("v3.3.0", html); self.assertIn("Attention", html)
+        self.assertNotIn("style=", html)  # CSP forbids inline styles
+        self.assertIn("Restart go-pulse", html); self.assertNotIn(">Apply update<", html)
+
+    def test_action_needs_confirmation_then_writes_one_request(self):
+        self.login()
+        tok = self.csrf("/")
+        r = self.c.post("/action/restart-geth", base_url=BASE, data={"csrf": tok})
+        self.assertEqual(r.status_code, 200); self.assertIn("Restart go-pulse?", r.get_data(as_text=True))
+        self.assertEqual(self.requests(), [])
+        r = self.c.post("/action/restart-geth", base_url=BASE, data={"csrf": tok, "confirmed": "yes"})
+        self.assertEqual(r.status_code, 302)
+        files = self.requests(); self.assertEqual(len(files), 1)
+        path = os.path.join(self.req, files[0])
+        with open(path) as fh:
+            req = json.load(fh)
+        self.assertEqual(req["action"], "restart-geth"); self.assertRegex(req["id"], r"^[0-9a-f]{16}$")
+        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode) & 0o007, 0)  # not world-readable
+        # A second action while one is queued is refused.
+        self.status = fake_status(queued=1)
+        self.c.post("/action/restart-node", base_url=BASE, data={"csrf": tok, "confirmed": "yes"})
+        self.assertEqual(len(self.requests()), 1)
+        self.assertIn("still running", self.c.get("/", base_url=BASE).get_data(as_text=True))
+
+    def test_action_csrf_and_unknown(self):
+        self.login()
+        self.assertEqual(self.c.post("/action/restart-geth", base_url=BASE, data={"confirmed": "yes"}).status_code, 400)
+        tok = self.csrf("/")
+        self.assertEqual(self.c.post("/action/rm-rf", base_url=BASE, data={"csrf": tok, "confirmed": "yes"}).status_code, 404)
+        self.assertEqual(self.requests(), [])
+
+    def test_apply_update_only_when_available(self):
+        self.login()
+        tok = self.csrf("/")
+        self.c.post("/action/apply-update", base_url=BASE, data={"csrf": tok, "confirmed": "yes"})
+        self.assertEqual(self.requests(), [])
+        self.assertIn("Already up to date", self.c.get("/", base_url=BASE).get_data(as_text=True))
+        repo = dict(self.status["helper"]["repo"], behind=2, can_apply=True,
+                    incoming=[{"sha": "def5678", "date": "2026-10-20", "subject": "Bump go-pulse"}])
+        self.status = fake_status(helper=dict(self.status["helper"], repo=repo))
+        self.assertIn(">Apply update<", self.c.get("/", base_url=BASE).get_data(as_text=True))
+        self.c.post("/action/apply-update", base_url=BASE, data={"csrf": tok, "confirmed": "yes"})
+        self.assertEqual(len(self.requests()), 1)
+
+    def test_no_helper_disables_actions(self):
+        self.status = fake_status(helper=None)
+        self.login()
+        tok = self.csrf("/")
+        self.c.post("/action/restart-geth", base_url=BASE, data={"csrf": tok, "confirmed": "yes"})
+        self.assertEqual(self.requests(), [])
+
+    def test_log_route_only_accepts_ids(self):
+        self.login()
+        rid = "0123456789abcdef"
+        with open(os.path.join(self.state, "logs", f"{rid}.log"), "w") as fh:
+            fh.write("hello log")
+        self.assertIn("hello log", self.c.get(f"/log/{rid}", base_url=BASE).get_data(as_text=True))
+        for bad in ("..%2f..%2fetc%2fpasswd", "ZZZZ", "0123456789abcdeg"):
+            self.assertEqual(self.c.get(f"/log/{bad}", base_url=BASE).status_code, 404)
+
+    # --- health -----------------------------------------------------------------
+    def test_health_levels(self):
+        synced = {"up": True, "syncing": False, "current": 5, "highest": 5, "peers": 30}
+        cl_ok = {"up": True, "syncing": False, "el_offline": False, "peers": 20}
+        s = fake_status(el=synced, cl=cl_ok)
+        self.assertEqual(control.health(s)[0], "green")
+        self.assertEqual(control.health(fake_status(el={"up": False}))[0], "red")
+        s = fake_status(el=synced, cl=cl_ok, disk={"total": 1, "free": 0, "used_pct": 95.0})
+        self.assertEqual(control.health(s)[0], "red")
+
+
+if __name__ == "__main__":
+    unittest.main()
