@@ -47,6 +47,21 @@ print("PASS: page and helper allow the same actions:", ", ".join(a))
 PY
 then :; else fail "control.py and node-control.py ACTIONS differ"; fi
 
+# --- status.sh renders helper state and history (no services needed) -------------
+sv="$(mktemp -d)"; mkdir -p "${sv}/state"
+printf '%s\n' '{"generated_at":"2026-10-17T21:40:44+00:00","repo":{"head_short":"e1501f5","branch":"main","behind":0,"can_apply":false,"blocked_reasons":[]}}' > "${sv}/state/status.json"
+printf '%s\n' '{"finished":"2026-10-17T21:41:00+00:00","ok":true,"label":"Check for updates","summary":"up to date"}' \
+  '{"finished":"2026-10-17T21:42:00+00:00","ok":false,"label":"Apply update","summary":"not applied: local changes"}' > "${sv}/state/history.jsonl"
+out="$(NODE_CONTROL_VAR="${sv}" bash "${CTL}/status.sh" 2>&1 || true)"
+if grep -q 'fork e1501f5 on main' <<<"${out}" && grep -q 'ok    Check for updates: up to date' <<<"${out}" \
+   && grep -q 'FAIL  Apply update: not applied: local changes' <<<"${out}" && ! grep -qE 'Traceback|SyntaxError' <<<"${out}"; then
+  pass "status.sh prints helper status and last actions"
+else
+  printf '%s\n' "${out}" >&2
+  fail "status.sh output"
+fi
+rm -rf "${sv}"
+
 # --- Python tests --------------------------------------------------------------------
 if (cd "${CTL}" && python3 -m unittest tests/test_node_control.py >/dev/null 2>&1); then
   pass "node-control helper tests"

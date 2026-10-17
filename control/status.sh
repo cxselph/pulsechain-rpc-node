@@ -28,11 +28,13 @@ fi
 echo ""
 echo "=== Last actions ==="
 if [[ -r "${CONTROL_VAR}/state/history.jsonl" ]]; then
-  tail -n 5 "${CONTROL_VAR}/state/history.jsonl" | python3 -c '
+  python3 - "${CONTROL_VAR}/state/history.jsonl" <<'PY'
 import json, sys
-for line in sys.stdin:
+for line in open(sys.argv[1]).read().splitlines()[-5:]:
     e = json.loads(line)
-    print(f"  {e.get(\"finished\", \"\")}  {\"ok  \" if e.get(\"ok\") else \"FAIL\"}  {e.get(\"label\")}: {e.get(\"summary\")}")'
+    result = "ok  " if e.get("ok") else "FAIL"
+    print(f"  {e.get('finished', '')}  {result}  {e.get('label')}: {e.get('summary')}")
+PY
 else
   echo "  none yet"
 fi
