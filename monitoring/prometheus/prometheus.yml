@@ -1,0 +1,25 @@
+# Prometheus scrape config. All targets are on this host, bound to 127.0.0.1.
+# Ports match the node defaults (GETH_METRICS_PORT / BEACON_METRICS_PORT in
+# ../.env). If you change those, change them here too.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: go-pulse
+    metrics_path: /debug/metrics/prometheus
+    static_configs:
+      - targets: ["127.0.0.1:6060"]
+
+  - job_name: prysm
+    static_configs:
+      - targets: ["127.0.0.1:8080"]
+
+  # VM metrics plus the node status written by the pulse-node-metrics timer.
+  - job_name: node
+    static_configs:
+      - targets: ["127.0.0.1:9100"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:9090"]

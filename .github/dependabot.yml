@@ -4,13 +4,24 @@
 # upstream before we ever see a PR for it. Security fixes for known
 # vulnerabilities skip both the cooldown and the major-version filter below.
 #
-# Only GitHub Actions are covered here. The node images (go-pulse,
+# Covered here: GitHub Actions, and the monitoring images in
+# monitoring/docker-compose.yml (Docker Hub). The node images (go-pulse,
 # prysm-pulse) live on registry.gitlab.com and are tracked by
 # .github/workflows/upstream-releases.yml instead.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 14
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "docker-compose"
+    directory: "/monitoring"
     schedule:
       interval: "weekly"
     cooldown:
