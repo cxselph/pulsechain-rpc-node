@@ -4,6 +4,12 @@
 
 _COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Debian does not put /usr/sbin on a normal user's PATH, so `command -v ufw`
+# missed an active UFW and the P2P/RPC rules were never added.
+case ":${PATH}:" in *:/usr/sbin:*) ;; *) PATH="${PATH}:/usr/sbin" ;; esac
+case ":${PATH}:" in *:/sbin:*) ;; *) PATH="${PATH}:/sbin" ;; esac
+export PATH
+
 GETH_IMAGE_PINNED="registry.gitlab.com/pulsechaincom/go-pulse:v3.3.0@sha256:d2f59592244decca2d1f53b5c8a1d2f7b26cf25d0722118567cc8978b44e526f"
 BEACON_IMAGE_PINNED="registry.gitlab.com/pulsechaincom/prysm-pulse/beacon-chain:v2.3.0@sha256:31b44010a9e1ed35125541c4347bae8d343ea98e792651d48d595e610f4d1d78"
 GETH_IMAGE_LATEST="registry.gitlab.com/pulsechaincom/go-pulse:latest"
@@ -113,6 +119,9 @@ load_dotenv "${_COMMON_DIR}/.env"
 [[ -n "${GETH_P2P_PORT:-}" ]] || GETH_P2P_PORT=30303
 [[ -n "${BEACON_P2P_TCP_PORT:-}" ]] || BEACON_P2P_TCP_PORT=13000
 [[ -n "${BEACON_P2P_UDP_PORT:-}" ]] || BEACON_P2P_UDP_PORT=12000
+# Networks allowed to reach wallet RPC / the HTTPS front end through UFW.
+# Space-separated CIDRs. Default: all private IPv4 ranges. Tighten in .env.
+[[ -n "${LAN_ALLOW_FROM:-}" ]] || LAN_ALLOW_FROM="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
 [[ -n "${GETH_METRICS_PORT:-}" ]] || GETH_METRICS_PORT=6060
 [[ -n "${BEACON_METRICS_PORT:-}" ]] || BEACON_METRICS_PORT=8080
 [[ -n "${GETH_IMAGE:-}" ]] || GETH_IMAGE="${GETH_IMAGE_PINNED}"
@@ -120,7 +129,22 @@ load_dotenv "${_COMMON_DIR}/.env"
 export DATA_DIR HTTP_PORT WS_PORT HTTP_ADDR WS_ADDR BEACON_HTTP_PORT BEACON_GRPC_PORT
 export BEACON_HTTP_HOST BEACON_GRPC_HOST GETH_CACHE GETH_P2P_PORT
 export BEACON_P2P_TCP_PORT BEACON_P2P_UDP_PORT GETH_IMAGE BEACON_IMAGE
-export GETH_METRICS_PORT BEACON_METRICS_PORT
+export GETH_METRICS_PORT BEACON_METRICS_PORT LAN_ALLOW_FROM
+
+# Prints each LAN_ALLOW_FROM entry on its own line; returns 1 if any entry is
+# not an IPv4 CIDR (so a typo can't turn into a broad or broken UFW rule).
+lan_allow_from_list() {
+  local cidr ok=0
+  for cidr in ${LAN_ALLOW_FROM}; do
+    if [[ "${cidr}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]]; then
+      printf '%s\n' "${cidr}"
+    else
+      echo "LAN_ALLOW_FROM: '${cidr}' is not an IPv4 CIDR like 192.168.1.0/24" >&2
+      ok=1
+    fi
+  done
+  return "${ok}"
+}
 
 wallet_rpc_is_localhost() {
   case "${HTTP_ADDR}" in

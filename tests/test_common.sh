@@ -411,15 +411,35 @@ else
   fail "install.sh should call install_docker_safeguards"
 fi
 
+# LAN_ALLOW_FROM parsing
+if out="$(LAN_ALLOW_FROM="172.31.0.0/16 192.168.1.0/24" lan_allow_from_list)" \
+   && [[ "${out}" == $'172.31.0.0/16\n192.168.1.0/24' ]]; then
+  pass "lan_allow_from_list returns each CIDR"
+else
+  fail "lan_allow_from_list did not return the CIDRs"
+fi
+if LAN_ALLOW_FROM="172.31.0.0/16 0.0.0.0/0x" lan_allow_from_list >/dev/null 2>&1 \
+   || LAN_ALLOW_FROM="anywhere" lan_allow_from_list >/dev/null 2>&1; then
+  fail "lan_allow_from_list accepted an invalid entry"
+else
+  pass "lan_allow_from_list rejects invalid entries"
+fi
+# shellcheck disable=SC2016  # literal text in install.sh
+if grep -qF 'for range in ${lan_ranges}' "${ROOT}/install.sh" && ! grep -q 'for range in 10.0.0.0/8' "${ROOT}/install.sh"; then
+  pass "install.sh UFW rules use LAN_ALLOW_FROM"
+else
+  fail "install.sh should build RPC rules from LAN_ALLOW_FROM"
+fi
+
 # install.sh must find sbin tools (ufw) when run as a normal user on Debian
 if (
   PATH=/usr/bin:/bin
-  eval "$(sed -n '/^# Debian does not put \/usr\/sbin/,/^export PATH/p' "${ROOT}/install.sh")"
+  eval "$(sed -n '/^# Debian does not put \/usr\/sbin/,/^export PATH/p' "${ROOT}/common.sh")"
   [[ ":${PATH}:" == *:/usr/sbin:* && ":${PATH}:" == *:/sbin:* ]]
 ); then
-  pass "install.sh adds /usr/sbin and /sbin to PATH"
+  pass "common.sh adds /usr/sbin and /sbin to PATH (all installers)"
 else
-  fail "install.sh should add /usr/sbin and /sbin to PATH (Debian users lack them, so ufw is missed)"
+  fail "common.sh should add /usr/sbin and /sbin to PATH (Debian users lack them, so ufw is missed)"
 fi
 
 if [[ "$FAILED" -ne 0 ]]; then

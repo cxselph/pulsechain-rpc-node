@@ -1,0 +1,62 @@
+# HTTPS front end for the node: one hostname for wallets and browsers.
+#   POST / (and CORS preflight)  -> go-pulse JSON-RPC   (wallets: https://<host>)
+#   WebSocket upgrade            -> go-pulse WebSocket  (wss://<host>)
+#   /grafana/*                   -> Grafana             (if monitoring is installed)
+#   anything else                -> the landing page in ./site
+# {$VAR} values come from the container environment (see docker-compose.yml).
+{
+	# No admin API: on host networking it would let any local process rewrite the config.
+	admin off
+	# The certificate comes from your own CA (no ACME); port 80 is handled below.
+	auto_https disable_redirects
+	skip_install_trust
+}
+
+(security_headers) {
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+}
+
+{$PUBLIC_HOSTNAME}:443 {
+	tls /etc/caddy/tls/cert.pem /etc/caddy/tls/key.pem
+	import security_headers
+
+	redir /grafana /grafana/ 308
+	handle /grafana/* {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	@websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle @websocket {
+		reverse_proxy 127.0.0.1:{$WS_PORT}
+	}
+
+	@rpc {
+		method POST OPTIONS
+		path /
+	}
+	handle @rpc {
+		reverse_proxy 127.0.0.1:{$HTTP_PORT}
+	}
+
+	handle {
+		header {
+			X-Frame-Options DENY
+			Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		}
+		root * /srv/site
+		templates
+		file_server
+	}
+}
+
+# Plain http://<host> -> https://<host>
+http://{$PUBLIC_HOSTNAME} {
+	redir https://{host}{uri} 308
+}

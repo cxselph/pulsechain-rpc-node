@@ -6,11 +6,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-# Debian does not put /usr/sbin on a normal user's PATH, so `command -v ufw`
-# missed an active UFW and the P2P/RPC rules were never added.
-case ":${PATH}:" in *:/usr/sbin:*) ;; *) PATH="${PATH}:/usr/sbin" ;; esac
-case ":${PATH}:" in *:/sbin:*) ;; *) PATH="${PATH}:/sbin" ;; esac
-export PATH
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
@@ -434,7 +429,8 @@ fi
 # 9. UFW rules (only if UFW is already installed)
 # ---------------------------------------------------------------------------
 if command -v ufw >/dev/null 2>&1; then
-  info "UFW is installed — adding recommended rules (RPC restricted to common private ranges)..."
+  info "UFW is installed — adding recommended rules (RPC limited to LAN_ALLOW_FROM: ${LAN_ALLOW_FROM})..."
+  lan_ranges="$(lan_allow_from_list)" || die "Fix LAN_ALLOW_FROM in .env, then re-run ./install.sh"
 
   ufw_ok=0
   ufw_fail=0
@@ -457,7 +453,7 @@ if command -v ufw >/dev/null 2>&1; then
 
   # Restrict wallet RPC to common private LAN ranges (safe default).
   # Beacon HTTP/gRPC default to localhost; rules still help if you later bind them to the LAN.
-  for range in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
+  for range in ${lan_ranges}; do
     ufw_try from "${range}" to any port "${HTTP_PORT}" proto tcp comment 'Pulse RPC HTTP - LAN'
     ufw_try from "${range}" to any port "${WS_PORT}" proto tcp comment 'Pulse RPC WS - LAN'
     ufw_try from "${range}" to any port "${BEACON_HTTP_PORT}" proto tcp comment 'Pulse Beacon API - LAN'
@@ -478,7 +474,7 @@ if command -v ufw >/dev/null 2>&1; then
     if os_is_omarchy "${OS_ID}" "${OS_ID_LIKE}"; then
       info "Omarchy defaults to deny-incoming; inbound P2P (${GETH_P2P_PORT}/${BEACON_P2P_TCP_PORT}/${BEACON_P2P_UDP_PORT}) is now allowed."
     fi
-    warn "If your LAN uses a different subnet than 10/8, 172.16/12, or 192.168/16, edit the RPC rules."
+    warn "RPC is open to LAN_ALLOW_FROM (${LAN_ALLOW_FROM}). Narrow it in .env to your own subnet if you like."
     warn "IPv4 rules do not cover IPv6 — if the host has global IPv6, add matching rules or disable it."
   else
     warn "IMPORTANT about UFW:"
@@ -487,7 +483,7 @@ if command -v ufw >/dev/null 2>&1; then
     warn "    sudo ufw allow OpenSSH"
     warn "    sudo ufw enable"
     warn "  Then check: sudo ufw status numbered"
-    warn "  If your home network uses a different subnet, edit the rules accordingly."
+    warn "  RPC is limited to LAN_ALLOW_FROM in .env (${LAN_ALLOW_FROM})."
     warn "  IPv4 rules do not cover IPv6 — if the host has global IPv6, add matching rules or disable it."
     warn "  10.0.0.0/8 on a cloud VPC is the VPC, not a home LAN — tighten that range on VPS hosts."
   fi
