@@ -21,13 +21,22 @@ image="$(grep -E '^\s+image:' "${compose}" | awk '{print $2}')"
 if [[ "${image}" =~ ^caddy:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]; then
   pass "Caddy pinned by tag + digest"
   tag="${image#caddy:}"; tag="${tag%%@*}"; want="${image##*@}"
-  if got="$(python3 - "${tag}" <<'PY' 2>/dev/null
-import json, sys, urllib.request
-tok = json.load(urllib.request.urlopen("https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/caddy:pull", timeout=20))["token"]
-req = urllib.request.Request(f"https://registry-1.docker.io/v2/library/caddy/manifests/{sys.argv[1]}", method="HEAD", headers={
-    "Authorization": f"Bearer {tok}",
-    "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json"})
-print(urllib.request.urlopen(req, timeout=20).headers["Docker-Content-Digest"])
+  if got="$(python3 - library/caddy "${tag}" <<'PY' 2>/dev/null
+import json, sys, time, urllib.request
+repo, tag = sys.argv[1], sys.argv[2]
+def lookup():
+    tok = json.load(urllib.request.urlopen(
+        f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull", timeout=20))["token"]
+    req = urllib.request.Request(f"https://registry-1.docker.io/v2/{repo}/manifests/{tag}", method="HEAD", headers={
+        "Authorization": f"Bearer {tok}",
+        "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json"})
+    return urllib.request.urlopen(req, timeout=20).headers["Docker-Content-Digest"]
+for attempt in range(4):  # registries sometimes answer 5xx for a moment
+    try:
+        print(lookup()); break
+    except Exception:
+        if attempt == 3: raise
+        time.sleep(5 * (attempt + 1))
 PY
 )"; then
     [[ "${got}" == "${want}" ]] && pass "registry digest matches caddy:${tag}" || fail "caddy:${tag} registry digest ${got} != pin ${want}"
