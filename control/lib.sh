@@ -9,7 +9,7 @@ source "${CONTROL_DIR}/../common.sh"
 # shellcheck disable=SC2034  # used by the scripts that source this file
 {
 CONTROL_ENV="${CONTROL_DIR}/.env"
-CONTROL_VAR=/var/lib/node-control
+CONTROL_VAR="${NODE_CONTROL_VAR:-/var/lib/node-control}"  # overridable for tests
 CONTROL_UID=10001
 CONTROL_CONTAINER=pulse-control
 CONTROL_IMAGE=pulse-control:local
