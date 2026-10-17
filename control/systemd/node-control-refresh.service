@@ -1,0 +1,19 @@
+[Unit]
+Description=Refresh control page status: updates, containers (pulsechain-rpc-node)
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@REPO@
+ExecStart=/usr/bin/python3 @REPO@/control/node-control.py refresh
+TimeoutStartSec=5min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes

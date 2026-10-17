@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Log{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>{{ entry.get('label', 'Action log') }}</h1>
+  {% if entry %}<p class="{{ 'good' if entry.ok else 'bad' }}">{{ entry.summary }}</p>
+  <p class="hint">By {{ entry.by }} · started {{ entry.started }} · finished {{ entry.finished }}</p>{% endif %}
+  <pre>{{ text or '(no output)' }}</pre>
+  <p><a href="{{ url_for('index') }}">← Back</a></p>
+</section>
+{% endblock %}

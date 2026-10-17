@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for control page requests (pulsechain-rpc-node)
+
+[Path]
+DirectoryNotEmpty=/var/lib/node-control/requests
+MakeDirectory=no
+
+[Install]
+WantedBy=paths.target

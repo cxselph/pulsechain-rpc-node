@@ -275,6 +275,46 @@ There's no HSTS header on purpose. With a private CA it would lock out any devic
 
 ---
 
+## Optional: control page (`https://<your-host>/`)
+
+A phone-friendly page, served through the HTTPS front end, that shows node health and offers a fixed set of actions:
+
+- **Status:** a green / yellow / red banner; sync progress (with an ETA if monitoring is installed); peers; beacon; disk; Debian updates; go-pulse / Prysm versions; the fork commit; and whether `main` has updates (with the commit list and any image-pin changes). It refreshes on its own.
+- **Actions** (each behind a confirm screen, one at a time, all logged with output):
+  - Check for updates
+  - Apply update
+  - Roll back
+  - Restart node / go-pulse / Prysm
+
+**How it stays safe.** The page runs in a container with no Docker socket, a read-only filesystem, no capabilities, and no access to the repo. Pressing a button only drops a small request file in `/var/lib/node-control/requests`. Only the page's user can write there, and only the repo owner can read it. A systemd path unit then runs [`control/node-control.py`](control/node-control.py) **as the repo owner (not root)**. It accepts only the six actions above and rejects anything else.
+
+**Apply update** fast-forwards to what's already merged on `origin/main`, never anything else. It refuses if the checkout has local changes or isn't on `main`. It then restarts only what changed:
+
+| What changed | What runs |
+|---|---|
+| `docker-compose.yml` / `common.sh` | `./update.sh` (pinned images) |
+| `monitoring/` | the monitoring stack |
+| `proxy/` | the HTTPS front end |
+| `control/` | the page itself |
+
+Changes that need `sudo` (the monitoring helper, the control systemd units) are reported as a manual SSH step. **Roll back** returns to the commit before the last update the same way.
+
+**Sign-in.**
+- One password (scrypt hash, base64-encoded in `control/.env`, mode 600).
+- The session cookie is `__Host-`, Secure, HttpOnly and SameSite=Strict, with CSRF tokens on every form.
+- After 5 failed logins per IP (20 in total) within 15 minutes, sign-in is refused until the window passes.
+- The page sends a strict CSP (no inline scripts or styles).
+
+```bash
+./control/install.sh          # as the repo owner, after ./proxy/install.sh; asks for a password
+./control/status.sh           # container, helper units, last actions
+./control/set-password.sh     # forgot the password: sets a new one and signs every device out
+```
+
+If the control page isn't running, `https://<host>/` falls back to the static landing page. The wallet RPC on the same address is unaffected either way.
+
+---
+
 ## Dependency updates
 
 Nothing upstream reaches the node without review:
@@ -284,6 +324,7 @@ Nothing upstream reaches the node without review:
 - **Docker Engine** comes from Docker's signed apt repo. `install.sh` checks the signing key's fingerprint (`DOCKER_GPG_FINGERPRINT` in `common.sh`) before trusting it, and stops if it doesn't match.
 - **GitHub Actions** are pinned by commit SHA. Dependabot proposes minor/patch updates weekly with a 14-day cooldown and never merges them itself.
 - **Caddy** (HTTPS front end) is pinned by tag + digest in `proxy/docker-compose.yml`; `tests/test_proxy.sh` checks it against Docker Hub, and Dependabot covers it with the same policy.
+- **Control page:** base image pinned by digest in `control/Dockerfile`. Python packages are locked with hashes in `control/requirements.txt` (`pip install --require-hashes`; regenerate it with `pip-compile --generate-hashes` from `requirements.in`). Dependabot covers both.
 - **Monitoring images** (Prometheus, node_exporter, Grafana) are pinned by tag + digest in `monitoring/docker-compose.yml` and covered by the same Dependabot policy. `tests/test_monitoring.sh` checks each digest against Docker Hub.
 
 Don't switch any of these to floating tags or skip a verification step to get past an error. Fix the pin instead.
@@ -496,9 +537,11 @@ pulsechain-rpc-node/
 │   ├── test_image_pins.sh
 │   ├── check_upstream_releases.sh  # weekly: newer PulseChain releases?
 │   ├── test_monitoring.sh
-│   └── test_proxy.sh
+│   ├── test_proxy.sh
+│   └── test_control.sh
 ├── monitoring/               # optional Grafana + Prometheus stack (see above)
 ├── proxy/                    # optional HTTPS front end (Caddy)
+├── control/                  # optional control page + node-control helper
 ```
 
 ---

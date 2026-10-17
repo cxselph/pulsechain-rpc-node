@@ -1,0 +1,5 @@
+# Control page dependencies. Lock with:
+#   pip-compile --generate-hashes --strip-extras --output-file=requirements.txt requirements.in
+# Pick versions that have been public ~14 days unless a security fix needs newer.
+flask==3.1.3
+gunicorn==26.2.0

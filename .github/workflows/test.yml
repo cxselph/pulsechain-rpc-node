@@ -16,7 +16,7 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: shellcheck
-        run: shellcheck -x common.sh install.sh start.sh stop.sh restart.sh logs.sh update.sh status.sh tests/test_common.sh tests/test_beacon_flags.sh tests/test_image_pins.sh tests/check_upstream_releases.sh tests/test_monitoring.sh tests/test_proxy.sh monitoring/*.sh proxy/*.sh
+        run: shellcheck -x common.sh install.sh start.sh stop.sh restart.sh logs.sh update.sh status.sh tests/test_common.sh tests/test_beacon_flags.sh tests/test_image_pins.sh tests/check_upstream_releases.sh tests/test_monitoring.sh tests/test_proxy.sh tests/test_control.sh monitoring/*.sh proxy/*.sh control/*.sh
       - name: Helper and compose contract tests
         env:
           CI: "true"
@@ -26,3 +26,4 @@ jobs:
           bash tests/test_image_pins.sh
           bash tests/test_monitoring.sh
           bash tests/test_proxy.sh
+          bash tests/test_control.sh

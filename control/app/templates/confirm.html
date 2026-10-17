@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ ACTIONS[name][0] }}{% endblock %}
+{% block content %}
+{% set repo = (s.helper or {}).get('repo', {}) %}
+<section class="card narrow">
+  <h1>{{ ACTIONS[name][0] }}?</h1>
+  <p>{{ ACTIONS[name][1] }}</p>
+  {% if name == 'apply-update' %}
+  <ul class="commits">{% for c in repo.get('incoming', []) %}<li><code>{{ c.sha }}</code> {{ c.subject }}</li>{% endfor %}</ul>
+  {% if repo.get('incoming_areas') %}<p class="hint">Will restart: {{ repo.incoming_areas | join(', ') | replace('node', 'go-pulse + Prysm') | replace('proxy', 'HTTPS front end') | replace('control', 'this page') }}</p>{% else %}<p class="hint">Nothing needs a restart.</p>{% endif %}
+  {% elif name == 'rollback' %}
+  <p class="hint">Back to <code>{{ repo.get('rollback_to') }}</code>. The update will show as available again afterwards.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('action', name=name) }}" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="confirmed" value="yes">
+    <button class="primary" type="submit">Yes, {{ ACTIONS[name][0] | lower }}</button>
+    <a class="button" href="{{ url_for('index') }}">Cancel</a>
+  </form>
+</section>
+{% endblock %}

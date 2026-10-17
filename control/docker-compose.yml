@@ -1,0 +1,41 @@
+# pulsechain-rpc-node — optional control page (status, restart, apply update)
+# Served at https://<host>/ through the HTTPS front end (proxy/). The container
+# has no Docker access and can't write to the repo: actions become request
+# files that the node-control systemd service carries out (see node-control.py).
+# Set up with ./control/install.sh.
+
+name: pulse-control
+
+services:
+  control:
+    build: .
+    image: pulse-control:local
+    container_name: pulse-control
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # CONTROL_PASSWORD_HASH (base64), CONTROL_SECRET_KEY, PUBLIC_HOSTNAME
+    env_file: .env
+    environment:
+      CONTROL_RPC_URL: http://127.0.0.1:${HTTP_PORT:-8545}
+      CONTROL_BEACON_URL: http://127.0.0.1:${BEACON_HTTP_PORT:-3500}
+    volumes:
+      - /var/lib/node-control/requests:/requests
+      - /var/lib/node-control/state:/state:ro
+      # Any directory on the chain disk, read-only, just for free-space numbers.
+      - ${DATA_DIR:-/blockchain}/control:/chainfs:ro
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

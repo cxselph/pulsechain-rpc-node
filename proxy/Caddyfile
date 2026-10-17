@@ -2,7 +2,8 @@
 #   POST / (and CORS preflight)  -> go-pulse JSON-RPC   (wallets: https://<host>)
 #   WebSocket upgrade            -> go-pulse WebSocket  (wss://<host>)
 #   /grafana/*                   -> Grafana             (if monitoring is installed)
-#   anything else                -> the landing page in ./site
+#   anything else                -> the control page (or the landing page in ./site
+#                                   when the control page isn't running)
 # {$VAR} values come from the container environment (see docker-compose.yml).
 {
 	# No admin API: on host networking it would let any local process rewrite the config.
@@ -45,12 +46,19 @@
 		reverse_proxy 127.0.0.1:{$HTTP_PORT}
 	}
 
+	# Everything else: the control page (control/). If it isn't installed or
+	# running, the static landing page in ./site is shown instead.
 	handle {
+		reverse_proxy 127.0.0.1:8090
+	}
+
+	handle_errors 502 503 {
 		header {
 			X-Frame-Options DENY
 			Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 		}
 		root * /srv/site
+		rewrite * /index.html
 		templates
 		file_server
 	}
