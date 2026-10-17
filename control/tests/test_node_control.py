@@ -149,9 +149,12 @@ class NodeControlTest(unittest.TestCase):
         self.assertIn("control restart", self.calls_log())
 
     def test_manual_steps_reported(self):
-        areas, manual = nc.classify(["monitoring/exporter/pulse-node-metrics.py", "control/systemd/x.service"])
-        self.assertEqual(manual, ["./control/install.sh", "./monitoring/install.sh"])
+        areas, manual = nc.classify(["monitoring/exporter/pulse-node-metrics.py", "control/systemd/x.service",
+                                     "tailscale/install.sh"])
+        self.assertEqual(manual, ["./control/install.sh", "./monitoring/install.sh", "./tailscale/install.sh"])
         self.assertFalse(any(areas.values()))
+        areas, manual = nc.classify(["tailscale/Corefile"])
+        self.assertTrue(areas["tailscale"]); self.assertEqual(manual, [])
 
     def test_restart_actions_call_compose(self):
         self.request("restart-geth"); nc.process()

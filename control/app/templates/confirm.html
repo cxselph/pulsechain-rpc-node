@@ -7,7 +7,7 @@
   <p>{{ ACTIONS[name][1] }}</p>
   {% if name == 'apply-update' %}
   <ul class="commits">{% for c in repo.get('incoming', []) %}<li><code>{{ c.sha }}</code> {{ c.subject }}</li>{% endfor %}</ul>
-  {% if repo.get('incoming_areas') %}<p class="hint">Will restart: {{ repo.incoming_areas | join(', ') | replace('node', 'go-pulse + Prysm') | replace('proxy', 'HTTPS front end') | replace('control', 'this page') }}</p>{% else %}<p class="hint">Nothing needs a restart.</p>{% endif %}
+  {% if repo.get('incoming_areas') %}<p class="hint">Will restart: {{ repo.incoming_areas | join(', ') | replace('node', 'go-pulse + Prysm') | replace('proxy', 'HTTPS front end') | replace('control', 'this page') | replace('tailscale', 'Tailscale DNS') }}</p>{% else %}<p class="hint">Nothing needs a restart.</p>{% endif %}
   {% elif name == 'rollback' %}
   <p class="hint">Back to <code>{{ repo.get('rollback_to') }}</code>. The update will show as available again afterwards.</p>
   {% endif %}
