@@ -1,0 +1,13 @@
+# Alert email. Recipient comes from ALERT_EMAIL_TO in monitoring/.env;
+# SMTP settings from the GF_SMTP_* variables there.
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: email
+    receivers:
+      - uid: pulse-email
+        type: email
+        settings:
+          addresses: ${ALERT_EMAIL_TO}
+          singleEmail: true
+        disableResolveMessage: false

@@ -1,0 +1,335 @@
+# Alert rules (Grafana-managed). Each query counts what is wrong; the rule
+# fires when the count is above 0. No result means nothing is wrong (OK).
+# Rules that look back over a window also require most of that window to have
+# data (count_over_time), so a fresh install can't trip them on day one.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pulsechain-node
+    folder: PulseChain
+    interval: 1m
+    rules:
+      - uid: pulse-el-down
+        title: 'go-pulse is not answering'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(pulse_el_up == 0)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: 'go-pulse JSON-RPC on this host has not answered for 5 minutes. Wallets can''t use the node.'
+          description: 'On the VM: ./status.sh and ./logs.sh geth. The container may be stopped or crash-looping.'
+      - uid: pulse-cl-down
+        title: 'Prysm beacon node is not answering'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(pulse_cl_up == 0)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: 'The Prysm beacon API has not answered for 5 minutes. Without it go-pulse can''t follow the chain.'
+          description: 'On the VM: ./status.sh and ./logs.sh beacon.'
+      - uid: pulse-target-down
+        title: 'A monitoring target is down'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(up{job=~"go-pulse|prysm|node|prometheus"} == 0)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'Prometheus can''t scrape go-pulse, Prysm, node_exporter or itself.'
+          description: 'Check the containers: ./status.sh and ./monitoring/status.sh.'
+      - uid: pulse-helper-stale
+        title: 'Node status helper stopped'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(time() - pulse_metrics_last_run_timestamp_seconds > 300)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 2m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'The pulse-node-metrics timer hasn''t written node status for over 5 minutes, so sync and peer alerts are blind.'
+          description: 'On the VM: systemctl status pulse-node-metrics.timer pulse-node-metrics.service'
+      - uid: pulse-sync-stalled
+        title: 'Initial sync stalled'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(pulse_el_syncing == 1 and delta(pulse_el_sync_progress[1h]) <= 0 and count_over_time(pulse_el_sync_progress[1h]) > 200)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'go-pulse is syncing but none of its block or snap-sync counters moved in the last hour.'
+          description: 'Check peers and logs: ./status.sh, ./logs.sh geth. A restart (./restart.sh) often clears a stuck sync.'
+      - uid: pulse-head-stalled
+        title: 'Chain head stopped advancing'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(pulse_el_syncing == 0 and delta(pulse_el_current_block[10m]) <= 0 and count_over_time(pulse_el_current_block[10m]) > 30)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: 'The node is synced but has not imported a new block in 10 minutes (PulseChain makes one every 10 seconds).'
+          description: 'Check ./status.sh (peers, el_offline) and ./logs.sh.'
+      - uid: pulse-behind
+        title: 'Beacon node falling behind'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(pulse_cl_sync_distance > 50)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'The beacon node has been more than 50 slots behind the network head for 15 minutes.'
+          description: 'Check peers and the host''s CPU / disk load in Grafana.'
+      - uid: pulse-peers-low
+        title: 'Low peer count'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(pulse_el_peers < 5 or pulse_cl_peers < 5)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'go-pulse or Prysm has had fewer than 5 peers for 15 minutes.'
+          description: 'Check the router port forwards (30303 TCP/UDP, 13000 TCP, 12000 UDP) and the VM firewall (sudo ufw status).'
+      - uid: pulse-el-offline
+        title: 'Beacon node can''t reach go-pulse'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(pulse_cl_el_offline == 1 and pulse_el_syncing == 0)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: 'Prysm reports the execution client offline although go-pulse says it is synced.'
+          description: 'Check the Engine API link: both containers running, /blockchain/jwt.hex unchanged, ./logs.sh beacon.'
+      - uid: pulse-disk-high
+        title: 'Disk over 85% full'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(100 * (1 - node_filesystem_avail_bytes{mountpoint=~"/|/blockchain"} / node_filesystem_size_bytes{mountpoint=~"/|/blockchain"}) > 85)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'The chain disk (/blockchain) or the VM''s system disk (/) is over 85% full.'
+          description: 'Chain disk: grow it in Proxmox (qm resize 101 scsi1 +500G, then resize2fs). System disk: docker system df, old images and logs.'
+      - uid: pulse-disk-trend
+        title: 'Chain disk full within 30 days'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(predict_linear(node_filesystem_avail_bytes{mountpoint="/blockchain"}[3d], 30 * 86400) < 0 and on(instance) count_over_time(node_filesystem_avail_bytes{mountpoint="/blockchain"}[3d]) > 8000 and on(instance) pulse_el_syncing == 0)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'At the last 3 days'' growth rate, /blockchain will be full within 30 days. (Ignored during the initial sync, which grows fast.)'
+          description: 'Plan to grow the chain disk in Proxmox, or check what is growing.'
+      - uid: pulse-restart-loop
+        title: 'Node client restarting repeatedly'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(changes(up{job=~"go-pulse|prysm"}[1h]) >= 6)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: 'go-pulse or Prysm went down and came back at least 3 times in the last hour.'
+          description: 'Check ./logs.sh for crash messages, and the VM''s memory in Grafana.'

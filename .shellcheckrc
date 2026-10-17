@@ -1,0 +1,2 @@
+# Resolve "source" paths relative to each script (monitoring/ sources ../common.sh).
+source-path=SCRIPTDIR

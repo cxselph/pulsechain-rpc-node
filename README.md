@@ -204,6 +204,42 @@ Chain data is stored under **`/blockchain`** and is retained when containers are
 
 ---
 
+## Optional: monitoring (Grafana + Prometheus)
+
+Graphs, history and email alerts for the node, all running on the node host and bound to `127.0.0.1` (no new firewall rules, nothing exposed to the LAN).
+
+| Piece | Role |
+|---|---|
+| Prometheus (`127.0.0.1:9090`) | Scrapes go-pulse, Prysm and node_exporter every 15 s; keeps 30 days (`$DATA_DIR/monitoring/prometheus`) |
+| node_exporter (`127.0.0.1:9100`) | Host CPU, memory, disk, network |
+| `pulse-node-metrics` timer | Every 30 s, a small read-only helper asks go-pulse and Prysm what `status.sh` asks (sync, blocks, peers, `el_offline`) and writes it for node_exporter. It runs as an unprivileged systemd `DynamicUser` that can only talk to localhost. |
+| Grafana (`127.0.0.1:3000/grafana/`) | Dashboards ("PulseChain node overview", "Node Exporter Full") and alerts by email |
+
+**Install** (after the node is running):
+
+```bash
+./monitoring/install.sh          # first run creates monitoring/.env, then stops
+nano monitoring/.env             # SMTP server/user/password, sender, ALERT_EMAIL_TO
+./monitoring/install.sh          # installs the helper, starts the stack, asks for a Grafana password
+```
+
+**Open Grafana** from your computer through an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 <user>@<node>`, then http://localhost:3000/grafana/ (user `admin`). Send a test email under Alerting → Contact points → email → Test.
+
+**Alerts** (email, repeated every 12 h while active): go-pulse or Prysm not answering, a scrape target down, the status helper stopped, initial sync stalled for 1 h, chain head stopped for 10 min, beacon more than 50 slots behind, fewer than 5 peers, beacon reports go-pulse offline after sync, a disk over 85%, chain disk full within 30 days at the current rate, and a client restarting repeatedly.
+
+**Password recovery.** Lost the Grafana password? Run `./monitoring/reset-grafana-password.sh` on the node. No old password is needed. Lost the SMTP password? Create a new one with your provider, update `monitoring/.env`, then run `./monitoring/restart.sh`.
+
+| Action | Command |
+|---|---|
+| Status (containers, helper, targets) | `./monitoring/status.sh` |
+| Logs | `./monitoring/logs.sh [grafana\|prometheus\|node-exporter]` |
+| Apply `.env` changes | `./monitoring/restart.sh` |
+| Stop / start | `./monitoring/stop.sh`, `./monitoring/start.sh` |
+
+`monitoring/.env` holds the SMTP password: it is gitignored and kept at mode 600. Grafana makes no outbound calls apart from email (usage reporting, update checks, news and plugin downloads are all disabled).
+
+---
+
 ## Dependency updates
 
 Nothing upstream reaches the node without review:
@@ -212,6 +248,7 @@ Nothing upstream reaches the node without review:
 - **Avoid `./update.sh --latest`** on a node you rely on. It floats on unpinned `:latest` images, so whatever is published next is what you run.
 - **Docker Engine** comes from Docker's signed apt repo. `install.sh` checks the signing key's fingerprint (`DOCKER_GPG_FINGERPRINT` in `common.sh`) before trusting it, and stops if it doesn't match.
 - **GitHub Actions** are pinned by commit SHA. Dependabot proposes minor/patch updates weekly with a 14-day cooldown and never merges them itself.
+- **Monitoring images** (Prometheus, node_exporter, Grafana) are pinned by tag + digest in `monitoring/docker-compose.yml` and covered by the same Dependabot policy. `tests/test_monitoring.sh` checks each digest against Docker Hub.
 
 Don't switch any of these to floating tags or skip a verification step to get past an error. Fix the pin instead.
 
@@ -421,7 +458,9 @@ pulsechain-rpc-node/
 │   ├── test_common.sh
 │   ├── test_beacon_flags.sh
 │   ├── test_image_pins.sh
-│   └── check_upstream_releases.sh  # weekly: newer PulseChain releases?
+│   ├── check_upstream_releases.sh  # weekly: newer PulseChain releases?
+│   └── test_monitoring.sh
+├── monitoring/               # optional Grafana + Prometheus stack (see above)
 ```
 
 ---
