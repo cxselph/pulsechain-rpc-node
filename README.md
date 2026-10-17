@@ -240,6 +240,41 @@ nano monitoring/.env             # SMTP server/user/password, sender, ALERT_EMAI
 
 ---
 
+## Optional: HTTPS front end (`https://<your-host>`)
+
+One hostname for everything, served by Caddy on the node host:
+
+| Request | Goes to |
+|---|---|
+| `POST https://<host>` (and CORS preflight) | go-pulse JSON-RPC — use **`https://<host>`** as the wallet RPC URL |
+| WebSocket `wss://<host>` | go-pulse WebSocket |
+| `https://<host>/grafana/` | Grafana (if the monitoring stack is installed) |
+| anything else in a browser | a small landing page with the wallet settings |
+| `http://<host>` | redirects to https |
+
+You need a DNS record for the hostname pointing at the node (router / local DNS), and a certificate for **exactly** that name from a CA your devices trust. For a local-only name like `rpc.home`, that's your own private CA. Public CAs can't issue for it.
+
+```bash
+# copy cert + key to the node first (e.g. scp cert.pem key.pem user@node:~/)
+./proxy/install.sh --host rpc.home --cert ~/cert.pem --key ~/key.pem
+rm ~/key.pem                    # the installer keeps its own root-only copy
+./proxy/status.sh               # certificate, firewall, and a live check of every route
+```
+
+What the installer does:
+- **Checks the certificate:** it's for the hostname, the key matches, and it isn't expired.
+- **Installs it** to `/etc/pulse-proxy/tls`, with the key readable by root only.
+- **Opens UFW 443 and 80** to `LAN_ALLOW_FROM` only.
+- **Starts Caddy**, which runs read-only with every capability dropped except binding low ports, and with its admin API off.
+- **Moves Grafana** to `https://<host>/grafana/` with Secure cookies, if monitoring is installed.
+- **Tests every route.**
+
+To renew the certificate, run `./proxy/install.sh --cert new.pem --key new-key.pem`.
+
+There's no HSTS header on purpose. With a private CA it would lock out any device that doesn't trust the CA yet. Don't port-forward 443 or 80 on the router: this stays a private endpoint.
+
+---
+
 ## Dependency updates
 
 Nothing upstream reaches the node without review:
@@ -248,6 +283,7 @@ Nothing upstream reaches the node without review:
 - **Avoid `./update.sh --latest`** on a node you rely on. It floats on unpinned `:latest` images, so whatever is published next is what you run.
 - **Docker Engine** comes from Docker's signed apt repo. `install.sh` checks the signing key's fingerprint (`DOCKER_GPG_FINGERPRINT` in `common.sh`) before trusting it, and stops if it doesn't match.
 - **GitHub Actions** are pinned by commit SHA. Dependabot proposes minor/patch updates weekly with a 14-day cooldown and never merges them itself.
+- **Caddy** (HTTPS front end) is pinned by tag + digest in `proxy/docker-compose.yml`; `tests/test_proxy.sh` checks it against Docker Hub, and Dependabot covers it with the same policy.
 - **Monitoring images** (Prometheus, node_exporter, Grafana) are pinned by tag + digest in `monitoring/docker-compose.yml` and covered by the same Dependabot policy. `tests/test_monitoring.sh` checks each digest against Docker Hub.
 
 Don't switch any of these to floating tags or skip a verification step to get past an error. Fix the pin instead.
@@ -459,8 +495,10 @@ pulsechain-rpc-node/
 │   ├── test_beacon_flags.sh
 │   ├── test_image_pins.sh
 │   ├── check_upstream_releases.sh  # weekly: newer PulseChain releases?
-│   └── test_monitoring.sh
+│   ├── test_monitoring.sh
+│   └── test_proxy.sh
 ├── monitoring/               # optional Grafana + Prometheus stack (see above)
+├── proxy/                    # optional HTTPS front end (Caddy)
 ```
 
 ---

@@ -52,8 +52,9 @@ $SUDO systemctl daemon-reload
 # Run once now so the output directory exists before node_exporter mounts it.
 $SUDO systemctl start pulse-node-metrics.service || warn "First helper run failed (is the node running?). Check: journalctl -u pulse-node-metrics"
 $SUDO systemctl enable --now pulse-node-metrics.timer >/dev/null
-if [[ -r "${MON_TEXTFILE_DIR}/pulse_node.prom" ]]; then
-  ok "Node status helper running every 30 s ($(grep -c '^pulse_' "${MON_TEXTFILE_DIR}/pulse_node.prom") metrics)"
+# Behind systemd's root-only /var/lib/private, so check with sudo.
+if $SUDO test -s "${MON_TEXTFILE_DIR}/pulse_node.prom"; then
+  ok "Node status helper running every 30 s ($($SUDO grep -c '^pulse_' "${MON_TEXTFILE_DIR}/pulse_node.prom") metrics)"
 else
   warn "Helper output not found yet at ${MON_TEXTFILE_DIR}/pulse_node.prom"
 fi

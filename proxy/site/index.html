@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PulseChain node</title>
+<style>
+  :root { --bg:#f7f7f5; --fg:#1d1d1b; --muted:#66665f; --card:#fff; --line:#e3e3de; --accent:#0b6bcb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141413; --fg:#ececea; --muted:#a3a39b; --card:#1f1f1d; --line:#33332f; --accent:#6aa9ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:32px 16px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 24px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:16px; }
+  h2 { font-size:1rem; margin:0 0 10px; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:6px 0; border-top:1px solid var(--line); vertical-align:top; }
+  tr:first-child td { border-top:0; }
+  td:first-child { color:var(--muted); width:40%; padding-right:12px; }
+  code { font:0.95em ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-all; }
+  a { color:var(--accent); }
+  .note { color:var(--muted); font-size:0.9rem; margin:8px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>PulseChain node</h1>
+  <p class="sub">Private RPC on <code>{{.Host}}</code></p>
+
+  <section>
+    <h2>Wallet settings</h2>
+    <table>
+      <tr><td>Network name</td><td>PulseChain</td></tr>
+      <tr><td>RPC URL</td><td><code>https://{{.Host}}</code></td></tr>
+      <tr><td>Chain ID</td><td><code>369</code></td></tr>
+      <tr><td>Currency symbol</td><td>PLS</td></tr>
+      <tr><td>Block explorer</td><td><code>https://scan.pulsechain.com</code></td></tr>
+      <tr><td>WebSocket</td><td><code>wss://{{.Host}}</code></td></tr>
+    </table>
+    <p class="note">Only reachable from your own network. Wait until the node reports synced before sending transactions.</p>
+  </section>
+
+  <section>
+    <h2>Monitoring</h2>
+    <p><a href="/grafana/">Open Grafana</a> for sync progress, peers, disk and alerts.</p>
+  </section>
+</main>
+</body>
+</html>

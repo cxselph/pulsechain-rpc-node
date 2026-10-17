@@ -9,10 +9,13 @@ mon_compose ps || true
 echo ""
 echo "=== Node status helper ==="
 systemctl --no-pager --lines=0 status pulse-node-metrics.timer 2>/dev/null | sed -n '1,3p' || echo "timer not installed"
-if [[ -r "${MON_TEXTFILE_DIR}/pulse_node.prom" ]]; then
-  grep -E '^pulse_(el|cl)_(up|syncing|peers|current_block|highest_block|el_offline) ' "${MON_TEXTFILE_DIR}/pulse_node.prom" || true
+# The helper's directory sits behind systemd's root-only /var/lib/private, so
+# read the values the way Prometheus does: through node_exporter.
+if helper_metrics="$(curl -fsS -m 5 http://127.0.0.1:9100/metrics 2>/dev/null)"; then
+  grep -E '^pulse_(el|cl)_(up|syncing|peers|current_block|highest_block|el_offline) ' <<<"${helper_metrics}" \
+    || echo "node_exporter has no pulse_* metrics yet (helper output missing?)"
 else
-  echo "no ${MON_TEXTFILE_DIR}/pulse_node.prom yet"
+  echo "node_exporter not answering on 127.0.0.1:9100"
 fi
 echo ""
 echo "=== Prometheus targets ==="
