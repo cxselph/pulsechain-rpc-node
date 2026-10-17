@@ -59,6 +59,10 @@ services:
       - --ws.api=eth,net,web3,txpool
       - --ws.origins=*
       - --maxpeers=150
+      # Prometheus metrics (localhost only): /debug/metrics/prometheus
+      - --metrics
+      - --metrics.addr=127.0.0.1
+      - --metrics.port=${GETH_METRICS_PORT:-6060}
       - --discovery.port=${GETH_P2P_PORT:-30303}
       - --port=${GETH_P2P_PORT:-30303}
     # Image is alpine + geth only. attach-to-HTTP is the available readiness probe.
@@ -111,3 +115,7 @@ services:
       - --p2p-tcp-port=${BEACON_P2P_TCP_PORT:-13000}
       - --p2p-udp-port=${BEACON_P2P_UDP_PORT:-12000}
       - --p2p-max-peers=150
+      # Prometheus metrics (localhost only): /metrics. Prysm enables this by default;
+      # pinned here so the bind address never drifts.
+      - --monitoring-host=127.0.0.1
+      - --monitoring-port=${BEACON_METRICS_PORT:-8080}

@@ -258,6 +258,8 @@ Then run `./restart.sh`. Keep those ports firewalled to your LAN; never port-for
 | 3500 | TCP | Beacon REST API | `127.0.0.1` (localhost; override with `BEACON_HTTP_HOST`) |
 | 4000 | TCP | Beacon gRPC | `127.0.0.1` (localhost; override with `BEACON_GRPC_HOST`) |
 | 8551 | TCP | Engine API (JWT; geth ↔ beacon) | `127.0.0.1` (localhost only) |
+| 6060 | TCP | go-pulse Prometheus metrics (`/debug/metrics/prometheus`) | `127.0.0.1` (localhost only; `GETH_METRICS_PORT`) |
+| 8080 | TCP | Prysm Prometheus metrics (`/metrics`) | `127.0.0.1` (localhost only; `BEACON_METRICS_PORT`) |
 | 30303 | TCP/UDP | Execution P2P | Host (`GETH_P2P_PORT`) |
 | 13000 | TCP | Beacon P2P | Host (`BEACON_P2P_TCP_PORT`) |
 | 12000 | UDP | Beacon P2P | Host (`BEACON_P2P_UDP_PORT`) |
@@ -361,6 +363,8 @@ On a VPS or cloud VM, `10.0.0.0/8` (and often `172.16.0.0/12`) is the **VPC**, n
 | Geth cache | `1024` MB (`GETH_CACHE`) |
 | File descriptors | `nofile` 65535 (container ulimit) |
 | Checkpoint sync | `https://checkpoint.pulsechain.com` (trusted third party; same as official docs) |
+| Metrics | go-pulse `127.0.0.1:6060`, Prysm `127.0.0.1:8080` (Prometheus format, localhost only) |
+| Docker safeguards | `install.sh` adds a systemd drop-in (`RequiresMountsFor=$DATA_DIR`, `TimeoutStopSec=390`) and `"shutdown-timeout": 300` in `/etc/docker/daemon.json` (only if that file doesn't exist yet), so a host shutdown gives go-pulse time to close its database |
 | Restart policy | `unless-stopped` |
 | Stop grace period | `5m` |
 | Geth healthcheck | `geth attach --exec eth.chainId` against local HTTP RPC (beacon does not wait on it) |
