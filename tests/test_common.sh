@@ -363,6 +363,17 @@ else
   fail "install.sh should verify Docker's signing key"
 fi
 
+# install.sh must find sbin tools (ufw) when run as a normal user on Debian
+if (
+  PATH=/usr/bin:/bin
+  eval "$(sed -n '/^# Debian does not put \/usr\/sbin/,/^export PATH/p' "${ROOT}/install.sh")"
+  [[ ":${PATH}:" == *:/usr/sbin:* && ":${PATH}:" == *:/sbin:* ]]
+); then
+  pass "install.sh adds /usr/sbin and /sbin to PATH"
+else
+  fail "install.sh should add /usr/sbin and /sbin to PATH (Debian users lack them, so ufw is missed)"
+fi
+
 if [[ "$FAILED" -ne 0 ]]; then
   echo "One or more common.sh / script checks failed." >&2
   exit 1

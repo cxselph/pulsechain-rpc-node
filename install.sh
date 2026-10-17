@@ -6,6 +6,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+# Debian does not put /usr/sbin on a normal user's PATH, so `command -v ufw`
+# missed an active UFW and the P2P/RPC rules were never added.
+case ":${PATH}:" in *:/usr/sbin:*) ;; *) PATH="${PATH}:/usr/sbin" ;; esac
+case ":${PATH}:" in *:/sbin:*) ;; *) PATH="${PATH}:/sbin" ;; esac
+export PATH
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
