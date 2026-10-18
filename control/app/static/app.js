@@ -110,8 +110,13 @@
         const n = (x) => (x == null ? "—" : Number(x).toLocaleString());
         let t;
         if (!el.up) t = "go-pulse not answering";
-        else if (el.syncing) {
-          t = `Syncing: block ${n(el.current)} of ${n(el.highest)} (${(el.percent || 0).toFixed(1)}%)`;
+        else if (el.phase === "state") {
+          t = `Final step: healing state · ${n(el.healed)} trie nodes fixed`;
+          if (s.heal_per_min != null) t += ` (${n(Math.round(s.heal_per_min))}/min)`;
+        } else if (el.phase === "starting") {
+          t = "Starting sync: waiting for the chain head";
+        } else if (el.syncing) {
+          t = `Downloading blocks: ${n(el.current)} of ${n(el.highest)} (${(el.percent || 0).toFixed(1)}%)`;
           if (s.eta_hours != null) t += ` · ETA ~${s.eta_hours < 1 ? "<1" : Math.round(s.eta_hours)} h`;
         } else t = `Synced at block ${n(el.current)}`;
         t += ` · ${n(el.peers)} go-pulse / ${n(cl.peers)} Prysm peers`;

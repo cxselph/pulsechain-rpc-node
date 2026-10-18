@@ -16,15 +16,29 @@
     <h2>Sync</h2>
     {% if not el.up %}<p class="bad">go-pulse not answering</p>
     {% else %}
-    <p class="big">{% if el.syncing %}Syncing{% else %}<span class="good">Synced</span>{% endif %}</p>
+    {% set phase = el.get('phase') %}
+    <p class="big">{% if not el.syncing %}<span class="good">Synced</span>
+      {% elif phase == 'state' %}Final step: healing state
+      {% elif phase == 'starting' %}Starting sync
+      {% else %}Downloading blocks{% endif %}</p>
     <dl>
+      {% if phase == 'state' %}
+      <dt>Blocks</dt><dd><span class="good">all in</span> · {{ el.current | num }}</dd>
+      <dt>State</dt><dd>{{ el.accounts | num }} accounts downloaded</dd>
+      <dt>Healing</dt><dd>{{ el.healed | num }} trie nodes fixed{% if s.heal_per_min is defined %} · {{ s.heal_per_min | num }}/min{% endif %}{% if el.healing_pending %} · {{ el.healing_pending | num }} queued{% endif %}</dd>
+      {% elif phase == 'starting' %}
+      <dt>Block</dt><dd>{{ el.current | num }}</dd>
+      <dt>Status</dt><dd>waiting for the chain head from Prysm (downloading headers)</dd>
+      {% else %}
       <dt>Block</dt><dd>{{ el.current | num }}{% if el.syncing %} of {{ el.highest | num }}{% endif %}</dd>
       {% if el.syncing %}
       <dt>Blocks</dt><dd><progress max="100" value="{{ '%.1f' % el.get('percent', 0) }}"></progress> {{ '%.1f' % el.get('percent', 0) }}%</dd>
       {% if s.eta_hours is defined %}<dt>Block ETA</dt><dd>~{{ '%.0f' % s.eta_hours if s.eta_hours >= 1 else '<1' }} h at {{ s.blocks_per_min | num }}/min</dd>{% endif %}
       {% if el.accounts %}<dt>State</dt><dd>{{ el.accounts | num }} accounts{% if el.healed %}, {{ el.healed | num }} healed nodes{% endif %}</dd>{% endif %}
       {% endif %}
+      {% endif %}
     </dl>
+    {% if phase == 'state' %}<p class="hint">The last stretch: go-pulse fixes up state that changed while it downloaded. Usually a few hours; it finishes on its own.</p>{% endif %}
     {% if el.syncing %}<p class="hint">Don't send transactions until this says Synced.</p>{% endif %}
     <p class="hint"><a href="{{ url_for('console') }}">Watch it live in the console →</a></p>
     {% endif %}

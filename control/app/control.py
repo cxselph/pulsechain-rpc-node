@@ -362,11 +362,13 @@ def collect_status():
             el["highest"] = _num(syncing.get("highestBlock", 0))
             el["accounts"] = _num(syncing.get("syncedAccounts", 0))
             el["healed"] = _num(syncing.get("healedTrienodes", 0))
+            el["healing_pending"] = _num(syncing.get("healingTrienodes", 0))
         el["up"] = True
     except Exception:  # noqa: BLE001
         pass
     if el.get("highest"):
         el["percent"] = min(100.0, 100.0 * el["current"] / el["highest"])
+    el["phase"] = sync_phase(el)
     s["el"] = el
 
     cl = {"up": False}
@@ -378,6 +380,15 @@ def collect_status():
     except Exception:  # noqa: BLE001
         pass
     s["cl"] = cl
+
+    # Healing progress (trie nodes per minute) while in the final state phase.
+    if el.get("phase") == "state":
+        try:
+            heal = prom_scalar("rate(pulse_el_snap_healed_trienodes[10m]) * 60")
+            if heal is not None:
+                s["heal_per_min"] = heal
+        except Exception:  # noqa: BLE001
+            pass
 
     # Blocks per second over 30 min, from Prometheus (if monitoring is installed).
     try:
@@ -409,6 +420,32 @@ def collect_status():
     return s
 
 
+def sync_phase(el):
+    """Where go-pulse is in its sync, in words the page can use.
+
+    synced    eth_syncing is false
+    starting  no target yet (waiting for the beacon node / downloading headers)
+    blocks    downloading blocks (current < highest)
+    state     all blocks in, finishing the state download and healing (final step);
+              current can briefly read above highest here, which is normal
+    """
+    if not el.get("up"):
+        return "down"
+    if not el.get("syncing"):
+        return "synced"
+    if not el.get("highest"):
+        return "starting"
+    if el.get("current", 0) < el["highest"]:
+        return "blocks"
+    return "state"
+
+
+PHASE_TEXT = {
+    "starting": "syncing (waiting for the chain head)",
+    "state": "syncing (blocks done, healing state: final step)",
+}
+
+
 def health(s):
     """(level, headline) for the banner: green / yellow / red."""
     el, cl, disk, helper = s["el"], s["cl"], s.get("disk"), s.get("helper") or {}
@@ -425,7 +462,8 @@ def health(s):
     if disk and disk["used_pct"] >= 90:
         problems.append(f"chain disk {disk['used_pct']:.0f}% full")
     if el.get("up") and el.get("syncing"):
-        warnings.append(f"syncing ({el.get('percent', 0):.1f}% of blocks)")
+        phase = el.get("phase") or sync_phase(el)
+        warnings.append(PHASE_TEXT.get(phase, f"syncing ({el.get('percent', 0):.1f}% of blocks)"))
     if el.get("up") and el.get("peers", 0) < 5:
         warnings.append("few go-pulse peers")
     if cl.get("up") and cl.get("peers", 0) < 5:
