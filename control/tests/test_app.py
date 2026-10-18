@@ -20,7 +20,7 @@ BASE = "https://rpc.home"
 def fake_status(**over):
     s = {
         "now": "2026-10-17T20:00:00+00:00",
-        "el": {"up": True, "syncing": True, "current": 100, "highest": 200, "peers": 30, "percent": 50.0},
+        "el": {"up": True, "syncing": True, "current": 100, "highest": 200, "peers": 30, "percent": 50.0, "phase": "blocks"},
         "cl": {"up": True, "syncing": False, "el_offline": True, "head_slot": 7, "distance": 0, "peers": 20},
         "disk": {"total": 2_500_000_000_000, "free": 2_000_000_000_000, "used_pct": 20.0},
         "helper": {"repo": {"behind": 0, "can_apply": False, "pins": {"geth": "v3.3.0", "beacon": "v2.3.0"},
@@ -114,7 +114,7 @@ class AppTest(unittest.TestCase):
     def test_dashboard_renders_status(self):
         self.login()
         html = self.c.get("/", base_url=BASE).get_data(as_text=True)
-        self.assertIn("Syncing", html); self.assertIn("v3.3.0", html); self.assertIn("Attention", html)
+        self.assertIn("Downloading blocks", html); self.assertIn("v3.3.0", html); self.assertIn("Attention", html)
         self.assertNotIn("style=", html)  # CSP forbids inline styles
         self.assertIn("Restart go-pulse", html); self.assertNotIn(">Apply update<", html)
 
@@ -257,6 +257,33 @@ class AppTest(unittest.TestCase):
         r = self.c.get("/console/geth.json", base_url=BASE)
         self.assertEqual(r.mimetype, "application/json")
         self.assertEqual(r.get_json()["lines"], ['<script>alert(1)</script> INFO x'])  # data, rendered with textContent
+
+    # --- sync phases ------------------------------------------------------------------
+    def test_sync_phases(self):
+        base = {"up": True, "peers": 30}
+        self.assertEqual(control.sync_phase({"up": False}), "down")
+        self.assertEqual(control.sync_phase(dict(base, syncing=False, current=5, highest=5)), "synced")
+        self.assertEqual(control.sync_phase(dict(base, syncing=True, current=0, highest=0)), "starting")
+        self.assertEqual(control.sync_phase(dict(base, syncing=True, current=100, highest=200)), "blocks")
+        # The screenshot case: all blocks in, current briefly above highest, still healing.
+        self.assertEqual(control.sync_phase(dict(base, syncing=True, current=27825980, highest=27825849)), "state")
+
+    def test_healing_phase_wording(self):
+        el = {"up": True, "syncing": True, "current": 27825980, "highest": 27825849, "peers": 150, "percent": 100.0,
+              "accounts": 287243768, "healed": 1599660, "healing_pending": 4200}
+        el["phase"] = control.sync_phase(el)
+        self.status = fake_status(el=el, heal_per_min=5321.7)
+        self.assertEqual(self.status["health"], ("yellow", "syncing (blocks done, healing state: final step)"))
+        self.login()
+        html = self.c.get("/fragment/status", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Final step: healing state", html); self.assertIn("all in", html)
+        self.assertIn("1,599,660 trie nodes fixed", html); self.assertIn("5,321/min", html); self.assertIn("4,200 queued", html)
+        self.assertNotIn("27,825,980 of 27,825,849", html); self.assertNotIn("100.0%", html)
+
+    def test_blocks_phase_unchanged(self):
+        self.login()
+        html = self.c.get("/fragment/status", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Downloading blocks", html); self.assertIn("100 of 200", html); self.assertIn("50.0%", html)
 
     # --- health -----------------------------------------------------------------
     def test_health_levels(self):

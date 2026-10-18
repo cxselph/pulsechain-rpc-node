@@ -39,6 +39,8 @@ class NodeLogsTest(unittest.TestCase):
         t.start()
         time.sleep(4.5)  # first run, 3 s pause, second run
         stop.set()
+        t.join(10)  # don't leave the follower running into interpreter shutdown
+        self.assertFalse(t.is_alive(), "follower stops when asked")
         f.write()
         with open(os.path.join(nl.LIVE_DIR, "pulse-geth.log")) as fh:
             head, *lines = fh.read().splitlines()
