@@ -333,3 +333,57 @@ groups:
         annotations:
           summary: 'go-pulse or Prysm went down and came back at least 3 times in the last hour.'
           description: 'Check ./logs.sh for crash messages, and the VM''s memory in Grafana.'
+      - uid: pulse-clock
+        title: 'Clock out of sync'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(node_timex_sync_status == 0 or abs(node_timex_offset_seconds) > 0.5)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'The node''s clock has been unsynchronized, or more than 0.5 s off, for 15 minutes. Validator duties run in 10-second slots, and JWT auth between the clients also needs an accurate clock.'
+          description: 'On the VM: timedatectl (System clock synchronized: yes). Check that systemd-timesyncd is running and NTP isn''t blocked.'
+      - uid: pulse-no-inbound
+        title: 'No inbound peers'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(max(p2p_peers_inbound{job="go-pulse"}) == 0 and on() max(pulse_el_syncing) == 0)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 6h
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'go-pulse has had no inbound peers for 6 hours since the initial sync finished, so other nodes can''t reach it. The router port forwards or the VM firewall have probably changed.'
+          description: 'Check the router forwards (30303 TCP/UDP, 13000 TCP, 12000 UDP to the node) and sudo ufw status on the VM.'

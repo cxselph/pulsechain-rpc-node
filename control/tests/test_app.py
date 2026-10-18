@@ -27,6 +27,8 @@ def fake_status(**over):
                             "head_short": "abc1234", "rollback_to": None, "blocked_reasons": []},
                    "containers": {"pulse-geth": {"running": True, "status": "running"}}, "system": {}},
         "running": None, "queued": 0, "history": [],
+        "readiness": {"ready": 0.0, "synced": 0.0, "peers_ok": 1.0, "clock_ok": 1.0, "streak_days": 0.0,
+                      "uptime_pct": 99.9, "downtime_min": 12.0, "outages": 1.0, "history_days": 3.5, "inbound_avg": 4.2},
     }
     for k, v in over.items():
         s[k] = v
@@ -171,6 +173,47 @@ class AppTest(unittest.TestCase):
         self.assertIn("hello log", self.c.get(f"/log/{rid}", base_url=BASE).get_data(as_text=True))
         for bad in ("..%2f..%2fetc%2fpasswd", "ZZZZ", "0123456789abcdeg"):
             self.assertEqual(self.c.get(f"/log/{bad}", base_url=BASE).status_code, 404)
+
+    # --- wallet settings + readiness ---------------------------------------------
+    def test_wallet_settings_card(self):
+        self.login()
+        html = self.c.get("/", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Wallet settings", html)
+        for text in ("<code>369</code>", "<code>https://rpc.home</code>", "<code>PLS</code>", "wss://rpc.home",
+                     "https://scan.pulsechain.com", 'data-copy="369"', 'data-chain-id="0x171"', "Add to MetaMask"):
+            self.assertIn(text, html)
+        self.assertNotIn("style=", html)
+
+    def test_readiness_card(self):
+        self.login()
+        html = self.c.get("/fragment/status", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Validator readiness", html); self.assertIn("Not ready", html)
+        self.assertIn("0.0 of 30 days in a row", html); self.assertIn("99.90%", html); self.assertIn("12 min down, 1 outage", html)
+        self.status = fake_status(readiness=None)
+        html = self.c.get("/fragment/status", base_url=BASE).get_data(as_text=True)
+        self.assertIn("./monitoring/install.sh", html)
+
+    def test_readiness_queries(self):
+        orig = control.prom_scalar
+        try:
+            control._readiness_cache.update(at=0.0, data=None)
+            control.prom_scalar = lambda expr: {"pulse:ready": 1.0}.get(expr, 2.0)
+            r = control.readiness()
+            self.assertEqual(r["ready"], 1.0); self.assertEqual(r["uptime_pct"], 2.0)
+            self.assertEqual(set(r), set(control.READINESS_QUERIES))
+            # Prometheus missing -> None (and cached, not retried on every refresh)
+            control._readiness_cache.update(at=0.0, data=None)
+            def boom(expr):
+                raise OSError("connection refused")
+            control.prom_scalar = boom
+            self.assertIsNone(control.readiness())
+            # Rules not loaded yet (pulse:ready has no data) -> None
+            control._readiness_cache.update(at=0.0, data=None)
+            control.prom_scalar = lambda expr: None
+            self.assertIsNone(control.readiness())
+        finally:
+            control.prom_scalar = orig
+            control._readiness_cache.update(at=0.0, data=None)
 
     # --- health -----------------------------------------------------------------
     def test_health_levels(self):
