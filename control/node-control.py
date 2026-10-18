@@ -146,7 +146,7 @@ def classify(paths):
             areas["tailscale"] = True
         elif p.startswith("control/systemd/") or p == "control/install.sh":
             manual.append("./control/install.sh")
-        elif p.startswith("control/") and p != "control/node-control.py":
+        elif p.startswith("control/") and p not in ("control/node-control.py", "control/node-logs.py"):
             areas["control"] = True
     return areas, sorted(set(manual))
 

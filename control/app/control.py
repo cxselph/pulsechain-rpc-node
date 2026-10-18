@@ -61,6 +61,9 @@ READINESS_QUERIES = {
     "inbound_avg": "avg_over_time(pulse:inbound_peers[30d])",
 }
 
+# Console: containers whose recent logs node-logs keeps in STATE_DIR/live.
+CONSOLE_LOGS = {"geth": ("go-pulse", "pulse-geth"), "beacon": ("Prysm", "pulse-beacon")}
+
 LOGIN_WINDOW = 15 * 60
 LOGIN_MAX_PER_IP = 5
 LOGIN_MAX_TOTAL = 20
@@ -125,7 +128,8 @@ def create_app(config=None):
             if not token or not hmac.compare_digest(token, sent):
                 abort(400, "Your session expired. Go back, reload the page and try again.")
         if request.endpoint not in ("login",) and not session.get("auth"):
-            if request.endpoint == "api_status" or request.path.startswith("/fragment/"):
+            # Data endpoints answer 401 (scripts send you to sign in); pages redirect.
+            if request.endpoint in ("api_status", "console_lines") or request.path.startswith("/fragment/"):
                 abort(401)
             return redirect(url_for("login"))
         return None
@@ -204,6 +208,20 @@ def create_app(config=None):
         submit_request(name, request.remote_addr or "?")
         session["message"] = ("ok", f"{ACTIONS[name][0]}: started. This page updates as it runs.")
         return redirect(url_for("index"))
+
+    @app.get("/console")
+    def console():
+        return render_template("console.html", logs=CONSOLE_LOGS)
+
+    @app.get("/console/<name>.json")
+    def console_lines(name):
+        if name not in CONSOLE_LOGS:
+            abort(404)
+        try:
+            after = int(request.args.get("after", "0"))
+        except ValueError:
+            after = 0
+        return jsonify(read_live_log(CONSOLE_LOGS[name][1], after))
 
     @app.get("/log/<rid>")
     def log(rid):
@@ -294,6 +312,28 @@ def read_history(n=10):
         except ValueError:
             continue
     return out
+
+
+def read_live_log(container, after=0):
+    """Lines newer than `after` from node-logs' file for a container."""
+    path = os.path.join(STATE_DIR, "live", f"{container}.log")
+    try:
+        with open(path) as fh:
+            head = fh.readline()
+            lines = fh.read().splitlines()
+        updated = os.path.getmtime(path)
+    except OSError:
+        return {"seq": 0, "lines": [], "missing": True}
+    m = re.match(r"#seq (\d+)", head)
+    seq = int(m.group(1)) if m else len(lines)
+    first = seq - len(lines) + 1
+    if after < first - 1 or after > seq:  # gap, or the helper restarted: send everything
+        new = lines
+        reset = True
+    else:
+        new = lines[after - first + 1:] if after >= first else lines
+        reset = False
+    return {"seq": seq, "lines": new, "reset": reset, "age": max(0, int(time.time() - updated))}
 
 
 def pending_requests():

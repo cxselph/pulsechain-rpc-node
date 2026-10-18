@@ -155,6 +155,9 @@ class NodeControlTest(unittest.TestCase):
         self.assertFalse(any(areas.values()))
         areas, manual = nc.classify(["tailscale/Corefile"])
         self.assertTrue(areas["tailscale"]); self.assertEqual(manual, [])
+        # node-logs.py re-executes itself; it must not trigger a page rebuild.
+        areas, manual = nc.classify(["control/node-logs.py"])
+        self.assertFalse(any(areas.values())); self.assertEqual(manual, [])
 
     def test_restart_actions_call_compose(self):
         self.request("restart-geth"); nc.process()

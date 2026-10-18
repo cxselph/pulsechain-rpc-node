@@ -1,0 +1,24 @@
+[Unit]
+Description=Keep recent node logs for the control page console (pulsechain-rpc-node)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@REPO@
+ExecStart=/usr/bin/python3 @REPO@/control/node-logs.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

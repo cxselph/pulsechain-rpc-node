@@ -290,6 +290,7 @@ A phone-friendly page, served through the HTTPS front end, that shows node healt
 - **Status:** a green / yellow / red banner; sync progress (with an ETA if monitoring is installed); peers; beacon; disk; Debian updates; go-pulse / Prysm versions; the fork commit; and whether `main` has updates (with the commit list and any image-pin changes). It refreshes on its own.
 - **Wallet settings:** network name, RPC URL (`https://<host>`), chain ID 369, symbol, explorer and WebSocket, each with a Copy button. In a browser with MetaMask (desktop extension or MetaMask's in-app browser), **Add to MetaMask** fills them in.
 - **Validator readiness** (if monitoring is installed): ready now and which part fails, the streak toward 30 days, 30-day uptime, downtime, outages and inbound peers.
+- **Console** (`/console`): the last 500 lines of go-pulse and Prysm logs, updating every 3 s, with the sync numbers on top, a "sync lines only" filter, pause, and warnings/errors coloured. It's read-only. A separate `node-control-logs` service follows `docker logs` as the repo owner and keeps those lines in `/var/lib/node-control/state/live/`, so the page still has no Docker access.
 - **Actions** (each behind a confirm screen, one at a time, all logged with output):
   - Check for updates
   - Apply update

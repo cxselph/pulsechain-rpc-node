@@ -26,6 +26,7 @@
       {% endif %}
     </dl>
     {% if el.syncing %}<p class="hint">Don't send transactions until this says Synced.</p>{% endif %}
+    <p class="hint"><a href="{{ url_for('console') }}">Watch it live in the console →</a></p>
     {% endif %}
   </section>
 

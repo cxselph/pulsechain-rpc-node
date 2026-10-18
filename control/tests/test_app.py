@@ -215,6 +215,49 @@ class AppTest(unittest.TestCase):
             control.prom_scalar = orig
             control._readiness_cache.update(at=0.0, data=None)
 
+    # --- console --------------------------------------------------------------------
+    def write_live(self, container, seq, lines):
+        os.makedirs(os.path.join(self.state, "live"), exist_ok=True)
+        with open(os.path.join(self.state, "live", f"{container}.log"), "w") as fh:
+            fh.write(f"#seq {seq}\n" + "\n".join(lines) + "\n")
+
+    def test_console_requires_login_and_renders(self):
+        self.assertEqual(self.c.get("/console", base_url=BASE).status_code, 302)
+        self.assertEqual(self.c.get("/console/geth.json", base_url=BASE).status_code, 401)
+        self.login()
+        html = self.c.get("/console", base_url=BASE).get_data(as_text=True)
+        self.assertIn('data-tabs="geth,beacon"', html); self.assertIn("go-pulse", html); self.assertIn("Prysm", html)
+        self.assertNotIn("style=", html)
+
+    def test_console_incremental_lines(self):
+        self.login()
+        self.write_live("pulse-geth", 10, [f"line {i}" for i in range(6, 11)])  # lines 6..10
+        d = self.c.get("/console/geth.json", base_url=BASE).get_json()
+        self.assertEqual(d["seq"], 10); self.assertEqual(d["lines"][0], "line 6"); self.assertEqual(len(d["lines"]), 5)
+        d = self.c.get("/console/geth.json?after=8", base_url=BASE).get_json()
+        self.assertEqual(d["lines"], ["line 9", "line 10"]); self.assertFalse(d["reset"])
+        d = self.c.get("/console/geth.json?after=10", base_url=BASE).get_json()
+        self.assertEqual(d["lines"], [])
+        d = self.c.get("/console/geth.json?after=2", base_url=BASE).get_json()   # fell behind the window
+        self.assertTrue(d["reset"]); self.assertEqual(len(d["lines"]), 5)
+        d = self.c.get("/console/geth.json?after=99", base_url=BASE).get_json()  # helper restarted (seq went back)
+        self.assertTrue(d["reset"])
+        d = self.c.get("/console/geth.json?after=abc", base_url=BASE).get_json()
+        self.assertEqual(len(d["lines"]), 5)
+
+    def test_console_missing_and_unknown(self):
+        self.login()
+        self.assertTrue(self.c.get("/console/beacon.json", base_url=BASE).get_json()["missing"])
+        for bad in ("caddy", "..%2fstatus", "pulse-geth"):
+            self.assertEqual(self.c.get(f"/console/{bad}.json", base_url=BASE).status_code, 404)
+
+    def test_console_does_not_render_log_html(self):
+        self.login()
+        self.write_live("pulse-geth", 1, ['<script>alert(1)</script> INFO x'])
+        r = self.c.get("/console/geth.json", base_url=BASE)
+        self.assertEqual(r.mimetype, "application/json")
+        self.assertEqual(r.get_json()["lines"], ['<script>alert(1)</script> INFO x'])  # data, rendered with textContent
+
     # --- health -----------------------------------------------------------------
     def test_health_levels(self):
         synced = {"up": True, "syncing": False, "current": 5, "highest": 5, "peers": 30}
