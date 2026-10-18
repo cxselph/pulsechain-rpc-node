@@ -63,12 +63,12 @@ class Follower:
                 self.add("[node-logs] docker not found")
                 stop.wait(30)
                 continue
-            for raw in p.stdout:
-                self.add(raw)
-                if stop.is_set():
-                    break
-            p.kill()
-            p.wait()
+            with p:  # closes the pipe and reaps the process
+                for raw in p.stdout:
+                    self.add(raw)
+                    if stop.is_set():
+                        break
+                p.kill()
             stop.wait(3)
 
     def write(self):
