@@ -315,6 +315,11 @@ docker_gpg_key_is_valid() {
 # Out of the box, systemd kills dockerd after 90 s and dockerd stops containers
 # after 15 s on shutdown, which can cut go-pulse off mid-write. And if the chain
 # disk fails to mount, Docker would start the node against an empty directory.
+# Containers on the host network copy /etc/resolv.conf when they start, and a
+# DHCP client (dhcpcd on Debian 13) may write it only after boot has moved on.
+# Docker then starts them with no DNS server for good (Grafana alert email
+# failed with "lookup ... on [::1]:53"), so Docker waits for a nameserver first.
+DOCKER_DNS_WAIT_SEC=60
 DOCKER_DROPIN_NAME="pulsechain-rpc-node.conf"
 DOCKER_STOP_TIMEOUT_SEC=390      # systemd -> dockerd (must exceed the next line)
 DOCKER_SHUTDOWN_TIMEOUT_SEC=300  # dockerd -> containers (= compose stop_grace_period 5m)
@@ -329,7 +334,10 @@ docker_dropin_content() {
     "" \
     "[Service]" \
     "# Leave time for containers to finish their stop_grace_period on shutdown." \
-    "TimeoutStopSec=${DOCKER_STOP_TIMEOUT_SEC}"
+    "TimeoutStopSec=${DOCKER_STOP_TIMEOUT_SEC}" \
+    "# Wait for DHCP to write a DNS server, so containers start with working DNS." \
+    "# The leading - lets Docker start anyway (without DNS) if none appears." \
+    "ExecStartPre=-/usr/bin/timeout ${DOCKER_DNS_WAIT_SEC} /bin/sh -c 'until grep -qs \"^nameserver\" /etc/resolv.conf; do sleep 1; done'"
 }
 
 # install_docker_safeguards <root-prefix> <data-dir>

@@ -522,7 +522,7 @@ On a VPS or cloud VM, `10.0.0.0/8` (and often `172.16.0.0/12`) is the **VPC**, n
 | File descriptors | `nofile` 65535 (container ulimit) |
 | Checkpoint sync | `https://checkpoint.pulsechain.com` (trusted third party; same as official docs) |
 | Metrics | go-pulse `127.0.0.1:6060`, Prysm `127.0.0.1:8080` (Prometheus format, localhost only) |
-| Docker safeguards | `install.sh` adds a systemd drop-in (`RequiresMountsFor=$DATA_DIR`, `TimeoutStopSec=390`) and `"shutdown-timeout": 300` in `/etc/docker/daemon.json` (only if that file doesn't exist yet), so a host shutdown gives go-pulse time to close its database |
+| Docker safeguards | `install.sh` adds a systemd drop-in (`RequiresMountsFor=$DATA_DIR`, `TimeoutStopSec=390`) and `"shutdown-timeout": 300` in `/etc/docker/daemon.json` (only if that file doesn't exist yet), so a host shutdown gives go-pulse time to close its database. At boot, Docker also waits up to 60 s for DHCP to write a DNS server to `/etc/resolv.conf`, so containers (Grafana's alert email) don't start without DNS |
 | Restart policy | `unless-stopped` |
 | Stop grace period | `5m` |
 | Geth healthcheck | `geth attach --exec eth.chainId` against local HTTP RPC (beacon does not wait on it) |
