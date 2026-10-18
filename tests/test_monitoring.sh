@@ -77,7 +77,7 @@ rules="${MON}/grafana/provisioning/alerting/rules.yml"
 n_rules="$(grep -c '^      - uid: pulse-' "${rules}")"
 grep -q -- '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-45d}' "${compose}" && grep -qx 'PROMETHEUS_RETENTION=45d' "${MON}/.env.example" \
   && pass "Prometheus keeps 45 days (a full 30-day readiness window)" || fail "Prometheus retention should default to 45d"
-for uid in pulse-clock pulse-no-inbound; do
+for uid in pulse-clock pulse-no-inbound pulse-resync-report pulse-resync-slow; do
   grep -q "uid: ${uid}$" "${rules}" && pass "alert ${uid} present" || fail "alert ${uid} missing"
 done
 if [[ "${n_rules}" -ge 10 && "$(grep -c 'noDataState: OK' "${rules}")" -eq "${n_rules}" && "$(grep -c 'condition: C' "${rules}")" -eq "${n_rules}" ]]; then
@@ -86,6 +86,13 @@ else
   fail "alert rules malformed (rules=${n_rules})"
 fi
 if grep -q '\$' "${rules}"; then fail "rules.yml must not contain \$ (Grafana would treat it as an env variable)"; else pass "rules.yml has no \$ (no accidental env interpolation)"; fi
+if grep -A12 'name: email-report' "${MON}/grafana/provisioning/alerting/contact-points.yml" | grep -q 'disableResolveMessage: true' \
+   && grep -q '"notify", "=", "report"' "${MON}/grafana/provisioning/alerting/policies.yml" \
+   && grep -q 'notify: report' "${rules}"; then
+  pass "resync report goes to email-report (no resolved email)"
+else
+  fail "resync report should route to the email-report contact point with resolve messages off"
+fi
 # shellcheck disable=SC2016  # literal ${ALERT_EMAIL_TO}: Grafana expands it, not bash
 if grep -qF 'addresses: ${ALERT_EMAIL_TO}' "${MON}/grafana/provisioning/alerting/contact-points.yml"; then
   pass "alert recipient comes from ALERT_EMAIL_TO"
@@ -127,7 +134,7 @@ fi
 
 # --- Node status helper against fake go-pulse / Prysm endpoints ---------------
 if python3 - "${MON}/exporter/pulse-node-metrics.py" <<'PY'
-import http.server, json, os, subprocess, sys, tempfile, threading
+import http.server, json, os, subprocess, sys, tempfile, threading, time
 
 helper = sys.argv[1]
 state = {}
@@ -148,14 +155,15 @@ srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 url = f"http://127.0.0.1:{srv.server_port}"
 
-def run(rpc_url, beacon_url):
-    out = tempfile.mkdtemp()
-    env = dict(os.environ, STATE_DIRECTORY=out, PULSE_RPC_URL=rpc_url, PULSE_BEACON_URL=beacon_url)
+def run(rpc_url, beacon_url, out=None, boot=None):
+    out = out or tempfile.mkdtemp()
+    env = dict(os.environ, STATE_DIRECTORY=out, PULSE_RPC_URL=rpc_url, PULSE_BEACON_URL=beacon_url,
+               PULSE_BOOT_TIME=str(boot if boot is not None else int(time.time()) - 3600))
     subprocess.run([sys.executable, helper], env=env, check=True, capture_output=True)
     m = {}
     for line in open(os.path.join(out, "pulse_node.prom")):
         if line and not line.startswith("#"):
-            k, v = line.split(); m[k] = int(v)
+            k, v = line.rsplit(" ", 1); m[k] = int(v)
     return m
 
 def expect(m, **want):
@@ -164,7 +172,7 @@ def expect(m, **want):
 
 state["rpc"] = {"eth_syncing": {"currentBlock": "0x1c9c3c", "highestBlock": "0x1a88a40", "syncedAccounts": "0x10",
                                 "syncedStorage": "0x20", "syncedBytecodes": "0x0", "healedTrienodes": "0x0", "healedBytecodes": "0x0"},
-                "net_peerCount": "0x2c"}
+                "net_peerCount": "0x2c", "eth_getBlockByNumber": {"timestamp": hex(int(time.time()) - 900)}}
 state["beacon"] = {"/eth/v1/node/syncing": {"head_slot": "2780000", "sync_distance": "0", "is_syncing": False,
                                             "is_optimistic": True, "el_offline": True},
                    "/eth/v1/node/peer_count": {"connected": "14", "disconnected": "10"}}
@@ -175,10 +183,48 @@ expect(m, pulse_el_up=1, pulse_el_syncing=1, pulse_el_current_block=1875004, pul
        pulse_cl_head_slot=2780000, pulse_cl_sync_distance=0, pulse_cl_peers=14)
 print("PASS: helper while syncing")
 
-state["rpc"] = {"eth_syncing": False, "eth_blockNumber": "0x1a88b00", "net_peerCount": "0x32"}
+synced_rpc = {"eth_syncing": False, "eth_blockNumber": "0x1a88b00", "net_peerCount": "0x32",
+              "eth_getBlockByNumber": {"timestamp": hex(int(time.time()) - 5)}}
+synced_beacon = dict(state["beacon"])
+synced_beacon["/eth/v1/node/syncing"] = {"head_slot": "2780000", "sync_distance": "0", "is_syncing": False,
+                                         "is_optimistic": False, "el_offline": False}
+state["rpc"] = synced_rpc
 m = run(url, url)
 expect(m, pulse_el_syncing=0, pulse_el_current_block=27822848, pulse_el_highest_block=27822848, pulse_el_sync_progress=27822848)
+assert 0 <= m["pulse_el_head_age_seconds"] <= 10, m.get("pulse_el_head_age_seconds")
 print("PASS: helper when synced")
+
+# Resync after a reboot: the first run only records the boot (no report).
+out = tempfile.mkdtemp()
+now = int(time.time())
+state["beacon"] = synced_beacon
+m = run(url, url, out, boot=now - 86400)
+expect(m, pulse_resync_pending=0)
+assert not any(k.startswith("pulse_resync_report") for k in m)
+# New boot 2 min ago, clients answering but go-pulse still catching up.
+state["rpc"] = dict(synced_rpc, eth_syncing={"currentBlock": "0x1", "highestBlock": "0x2"})
+m = run(url, url, out, boot=now - 120)
+expect(m, pulse_resync_pending=1, pulse_resync_boot_timestamp_seconds=now - 120)
+assert 115 <= m["pulse_resync_elapsed_seconds"] <= 130 and "pulse_resync_seconds" not in m
+# Not synced while the newest block is stale, even if eth_syncing says false.
+state["rpc"] = dict(synced_rpc, eth_getBlockByNumber={"timestamp": hex(now - 600)})
+m = run(url, url, out, boot=now - 120)
+expect(m, pulse_resync_pending=1)
+# Caught up: one report series with the times, within the 15 min target.
+state["rpc"] = synced_rpc
+m = run(url, url, out, boot=now - 120)
+expect(m, pulse_resync_pending=0)
+assert 115 <= m["pulse_resync_seconds"] <= 130 and "pulse_resync_outage_seconds" in m
+report = [k for k in m if k.startswith("pulse_resync_report{")]
+assert len(report) == 1 and 'verdict="within the 15 min target"' in report[0] and 'took="2m ' in report[0], report
+# Later runs on the same boot keep the first synced time.
+m2 = run(url, url, out, boot=now - 120)
+assert m2["pulse_resync_seconds"] == m["pulse_resync_seconds"]
+# A boot that took over 15 min to sync says so.
+m = run(url, url, out, boot=now - 1200)
+report = [k for k in m if k.startswith("pulse_resync_report{")]
+assert len(report) == 1 and 'verdict="OVER the 15 min target"' in report[0], report
+print("PASS: resync after reboot")
 
 m = run("http://127.0.0.1:9", "http://127.0.0.1:9")
 expect(m, pulse_el_up=0, pulse_cl_up=0)

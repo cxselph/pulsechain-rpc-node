@@ -11,3 +11,15 @@ contactPoints:
           addresses: ${ALERT_EMAIL_TO}
           singleEmail: true
         disableResolveMessage: false
+  # Reports that aren't problems (the resync time after a reboot): one email,
+  # no "resolved" follow-up.
+  - orgId: 1
+    name: email-report
+    receivers:
+      - uid: pulse-email-report
+        type: email
+        settings:
+          addresses: ${ALERT_EMAIL_TO}
+          singleEmail: true
+          subject: 'PulseChain node: back in sync after a reboot in {{ .CommonLabels.took }} ({{ .CommonLabels.verdict }})'
+        disableResolveMessage: true
