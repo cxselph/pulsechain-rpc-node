@@ -387,3 +387,62 @@ groups:
         annotations:
           summary: 'go-pulse has had no inbound peers for 6 hours since the initial sync finished, so other nodes can''t reach it. The router port forwards or the VM firewall have probably changed.'
           description: 'Check the router forwards (30303 TCP/UDP, 13000 TCP, 12000 UDP to the node) and sudo ufw status on the VM.'
+      # Resync after a reboot. The status helper times boot -> back in sync.
+      # The report isn't a problem: it fires once per reboot, goes to the
+      # email-report contact point (no "resolved" email) and the series
+      # disappears 30 min later. Its labels carry the times for the email.
+      - uid: pulse-resync-report
+        title: 'Back in sync after a reboot'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'max by (booted, up, synced, took, verdict, down, outage) (pulse_resync_report)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: info, notify: report }
+        annotations:
+          summary: 'The node was back in sync {{ .Labels.took }} after the VM booted ({{ .Labels.verdict }}). Booted {{ .Labels.booted }}, both clients answering {{ .Labels.up }}, synced {{ .Labels.synced }}.'
+          description: 'Whole outage, including shutdown and any host restart: {{ .Labels.outage }} (both clients last answered before the reboot at {{ .Labels.down }}). Times are when the 30-second status helper saw each step.'
+      # Keep 900 in step with RESYNC_TARGET in exporter/pulse-node-metrics.py.
+      - uid: pulse-resync-slow
+        title: 'Not back in sync 15 min after a reboot'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(pulse_resync_pending == 1 and pulse_resync_elapsed_seconds > 900)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'The VM booted over 15 minutes ago and the node is still not back in sync. The report email follows once it is.'
+          description: 'Check ./status.sh (peers, sync distance) and ./logs.sh. The Validator readiness dashboard shows the resync time once it finishes.'
