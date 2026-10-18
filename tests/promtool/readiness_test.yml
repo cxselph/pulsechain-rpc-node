@@ -1,0 +1,81 @@
+# promtool unit tests for monitoring/prometheus/rules.yml (validator readiness)
+# and the streak / uptime expressions the dashboard and control page use.
+rule_files:
+  - /rules/rules.yml
+evaluation_interval: 1m
+
+tests:
+  # Everything healthy -> ready.
+  - interval: 1m
+    input_series:
+      - {series: 'pulse_el_up{job="node"}', values: '1x20'}
+      - {series: 'pulse_cl_up{job="node"}', values: '1x20'}
+      - {series: 'pulse_el_syncing{job="node"}', values: '0x20'}
+      - {series: 'pulse_cl_sync_distance{job="node"}', values: '1x20'}
+      - {series: 'pulse_el_peers{job="node"}', values: '40x20'}
+      - {series: 'pulse_cl_peers{job="node"}', values: '45x20'}
+      - {series: 'node_timex_sync_status{job="node"}', values: '1x20'}
+      - {series: 'node_timex_offset_seconds{job="node"}', values: '0.002x20'}
+      - {series: 'p2p_peers_inbound{job="go-pulse"}', values: '6x20'}
+    promql_expr_test:
+      - {expr: 'pulse:ready', eval_time: 10m, exp_samples: [{labels: 'pulse:ready', value: 1}]}
+      - {expr: 'pulse:both_up', eval_time: 10m, exp_samples: [{labels: 'pulse:both_up', value: 1}]}
+      - {expr: 'pulse:inbound_peers', eval_time: 10m, exp_samples: [{labels: 'pulse:inbound_peers', value: 6}]}
+
+  # Each failing condition on its own makes ready 0.
+  - interval: 1m
+    input_series:
+      - {series: 'pulse_el_up{job="node"}', values: '1x20'}
+      - {series: 'pulse_cl_up{job="node"}', values: '1x20'}
+      - {series: 'pulse_el_syncing{job="node"}', values: '1x20'}          # still syncing
+      - {series: 'pulse_cl_sync_distance{job="node"}', values: '0x20'}
+      - {series: 'pulse_el_peers{job="node"}', values: '40x20'}
+      - {series: 'pulse_cl_peers{job="node"}', values: '12x20'}           # too few Prysm peers
+      - {series: 'node_timex_sync_status{job="node"}', values: '0x20'}    # clock not synced
+      - {series: 'node_timex_offset_seconds{job="node"}', values: '0.002x20'}
+    promql_expr_test:
+      - {expr: 'pulse:synced', eval_time: 10m, exp_samples: [{labels: 'pulse:synced', value: 0}]}
+      - {expr: 'pulse:peers_ok', eval_time: 10m, exp_samples: [{labels: 'pulse:peers_ok', value: 0}]}
+      - {expr: 'pulse:clock_ok', eval_time: 10m, exp_samples: [{labels: 'pulse:clock_ok', value: 0}]}
+      - {expr: 'pulse:ready', eval_time: 10m, exp_samples: [{labels: 'pulse:ready', value: 0}]}
+      - {expr: 'pulse:both_up', eval_time: 10m, exp_samples: [{labels: 'pulse:both_up', value: 1}]}
+
+  # Clock offset over 0.5 s counts as not ok even when "synchronized".
+  - interval: 1m
+    input_series:
+      - {series: 'node_timex_sync_status{job="node"}', values: '1x5'}
+      - {series: 'node_timex_offset_seconds{job="node"}', values: '-0.8x5'}
+    promql_expr_test:
+      - {expr: 'pulse:clock_ok', eval_time: 3m, exp_samples: [{labels: 'pulse:clock_ok', value: 0}]}
+
+  # No data at all (helper or node_exporter down) -> 0, not "no data".
+  - interval: 1m
+    input_series:
+      - {series: 'unrelated', values: '1x5'}
+    promql_expr_test:
+      - {expr: 'pulse:both_up', eval_time: 3m, exp_samples: [{labels: 'pulse:both_up', value: 0}]}
+      - {expr: 'pulse:ready', eval_time: 3m, exp_samples: [{labels: 'pulse:ready', value: 0}]}
+
+  # Streak and uptime: down for minutes 10-19, healthy otherwise; evaluate at 2h.
+  - interval: 1m
+    input_series:
+      - {series: 'pulse_el_up{job="node"}', values: '1x9 0x9 1x110'}
+      - {series: 'pulse_cl_up{job="node"}', values: '1x130'}
+      - {series: 'pulse_el_syncing{job="node"}', values: '0x130'}
+      - {series: 'pulse_cl_sync_distance{job="node"}', values: '0x130'}
+      - {series: 'pulse_el_peers{job="node"}', values: '40x130'}
+      - {series: 'pulse_cl_peers{job="node"}', values: '45x130'}
+      - {series: 'node_timex_sync_status{job="node"}', values: '1x130'}
+      - {series: 'node_timex_offset_seconds{job="node"}', values: '0x130'}
+    promql_expr_test:
+      # Last not-ready minute was 19m -> streak at 120m is 101 minutes.
+      - expr: 'round((time() - max_over_time(pulse:not_ready_at[45d])) / 60)'
+        eval_time: 120m
+        exp_samples: [{labels: '{}', value: 101}]
+      # 10 of 121 evaluated minutes down.
+      - expr: 'round((1 - avg_over_time(pulse:both_up[30d])) * count_over_time(pulse:both_up[30d]))'
+        eval_time: 120m
+        exp_samples: [{labels: '{}', value: 10}]
+      - expr: 'ceil(changes(pulse:both_up[30d]) / 2)'
+        eval_time: 120m
+        exp_samples: [{labels: '{}', value: 1}]

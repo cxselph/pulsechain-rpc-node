@@ -4,4 +4,24 @@
 <div id="status" data-src="{{ url_for('fragment_status') }}">
 {% include "_status.html" %}
 </div>
+
+<section class="card" id="wallet">
+  <h2>Wallet settings</h2>
+  <p class="hint">For MetaMask, Internet Money and other wallets. Use them once the node shows <strong>Synced</strong>.</p>
+  {% set rpc = 'https://' ~ hostname %}
+  <dl class="copylist">
+    <dt>Network name</dt><dd><code>{{ CHAIN.name }}</code> <button class="copy" data-copy="{{ CHAIN.name }}">Copy</button></dd>
+    <dt>RPC URL</dt><dd><code>{{ rpc }}</code> <button class="copy" data-copy="{{ rpc }}">Copy</button></dd>
+    <dt>Chain ID</dt><dd><code>{{ CHAIN.chain_id }}</code> <button class="copy" data-copy="{{ CHAIN.chain_id }}">Copy</button></dd>
+    <dt>Currency symbol</dt><dd><code>{{ CHAIN.symbol }}</code> <button class="copy" data-copy="{{ CHAIN.symbol }}">Copy</button></dd>
+    <dt>Block explorer</dt><dd><code>{{ CHAIN.explorer }}</code> <button class="copy" data-copy="{{ CHAIN.explorer }}">Copy</button></dd>
+    <dt>WebSocket</dt><dd><code>wss://{{ hostname }}</code> <button class="copy" data-copy="wss://{{ hostname }}">Copy</button></dd>
+  </dl>
+  <p><button class="primary" id="add-wallet" hidden
+      data-chain-id="0x{{ '%x' % CHAIN.chain_id }}" data-name="{{ CHAIN.name }} ({{ hostname }})"
+      data-rpc="{{ rpc }}" data-symbol="{{ CHAIN.symbol }}" data-decimals="{{ CHAIN.decimals }}"
+      data-explorer="{{ CHAIN.explorer }}">Add to MetaMask</button>
+    <span class="hint" id="wallet-msg"></span></p>
+  <p class="hint">Works at home and, with Tailscale on, anywhere. Phones and computers must trust the .home certificate authority.</p>
+</section>
 {% endblock %}

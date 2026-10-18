@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Checks for the optional monitoring stack (monitoring/): pins, localhost-only
 # binds, provisioning files, and the node status helper against fake endpoints.
+# shellcheck disable=SC2015,SC2016  # pass() never fails; '${VAR}' patterns are literal compose text
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -74,6 +75,11 @@ fi
 # --- Provisioning files -------------------------------------------------------
 rules="${MON}/grafana/provisioning/alerting/rules.yml"
 n_rules="$(grep -c '^      - uid: pulse-' "${rules}")"
+grep -q -- '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-45d}' "${compose}" && grep -qx 'PROMETHEUS_RETENTION=45d' "${MON}/.env.example" \
+  && pass "Prometheus keeps 45 days (a full 30-day readiness window)" || fail "Prometheus retention should default to 45d"
+for uid in pulse-clock pulse-no-inbound; do
+  grep -q "uid: ${uid}$" "${rules}" && pass "alert ${uid} present" || fail "alert ${uid} missing"
+done
 if [[ "${n_rules}" -ge 10 && "$(grep -c 'noDataState: OK' "${rules}")" -eq "${n_rules}" && "$(grep -c 'condition: C' "${rules}")" -eq "${n_rules}" ]]; then
   pass "${n_rules} alert rules, each with condition C and noDataState OK"
 else
@@ -99,13 +105,19 @@ done
 pass ".env.example lists the SMTP and recipient settings"
 if git -C "${ROOT}" check-ignore -q monitoring/.env; then pass "monitoring/.env is gitignored"; else fail "monitoring/.env must be gitignored (it holds the SMTP password)"; fi
 
-# --- Prometheus config is valid (promtool from the pinned image) --------------
+# --- Prometheus config is valid and the readiness rules behave (promtool) -------
 prom_image="$(grep -E '^\s+image: prom/prometheus' "${compose}" | awk '{print $2}')"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  if docker run --rm --entrypoint promtool -v "${MON}/prometheus:/cfg:ro" "${prom_image}" check config /cfg/prometheus.yml >/dev/null 2>&1; then
-    pass "promtool check config"
+  if docker run --rm --entrypoint promtool -v "${MON}/prometheus:/etc/prometheus:ro" "${prom_image}" check config /etc/prometheus/prometheus.yml >/dev/null 2>&1; then
+    pass "promtool check config (with rules.yml)"
   else
     fail "promtool check config failed"
+  fi
+  if docker run --rm --entrypoint promtool -v "${MON}/prometheus:/rules:ro" -v "${ROOT}/tests/promtool:/t:ro" "${prom_image}" test rules /t/readiness_test.yml >/dev/null 2>&1; then
+    pass "promtool test rules: readiness signals, streak, downtime, outages"
+  else
+    docker run --rm --entrypoint promtool -v "${MON}/prometheus:/rules:ro" -v "${ROOT}/tests/promtool:/t:ro" "${prom_image}" test rules /t/readiness_test.yml || true
+    fail "readiness rule tests failed"
   fi
 elif in_ci; then
   fail "docker needed for promtool check"

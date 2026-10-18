@@ -30,10 +30,11 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}
+      # 45 days, so a full 30-day readiness window is always available.
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-45d}
       - --web.listen-address=127.0.0.1:9090
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus:/etc/prometheus:ro
       - ${DATA_DIR:-/blockchain}/monitoring/prometheus:/prometheus
 
   node-exporter:

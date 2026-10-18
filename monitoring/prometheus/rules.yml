@@ -1,0 +1,31 @@
+# Validator readiness signals, evaluated every minute. Each is a single
+# unlabeled 0/1 series (missing data counts as 0), so dashboards can average,
+# count and streak them. The bar (tune here if needed):
+#   synced  both clients answering, go-pulse not syncing, beacon <= 2 slots behind
+#   peers   go-pulse >= 25 and Prysm >= 30
+#   clock   kernel clock synchronized and within 0.5 s
+#   ready   all three at once
+groups:
+  - name: pulse-readiness
+    interval: 1m
+    rules:
+      - record: pulse:both_up
+        expr: (max(pulse_el_up) * max(pulse_cl_up)) or vector(0)
+      - record: pulse:synced
+        expr: >-
+          (max(pulse_el_up == bool 1) * max(pulse_cl_up == bool 1)
+           * max(pulse_el_syncing == bool 0) * max(pulse_cl_sync_distance <= bool 2)) or vector(0)
+      - record: pulse:peers_ok
+        expr: (max(pulse_el_peers >= bool 25) * max(pulse_cl_peers >= bool 30)) or vector(0)
+      - record: pulse:clock_ok
+        expr: >-
+          (max(node_timex_sync_status == bool 1)
+           * max(abs(node_timex_offset_seconds) < bool 0.5)) or vector(0)
+      - record: pulse:ready
+        expr: pulse:synced * pulse:peers_ok * pulse:clock_ok
+      # Exists only while not ready, valued with the time: the readiness streak
+      # is time() - max_over_time(pulse:not_ready_at[45d]) (no subquery).
+      - record: pulse:not_ready_at
+        expr: timestamp(pulse:ready == 0)
+      - record: pulse:inbound_peers
+        expr: max(p2p_peers_inbound{job="go-pulse"}) or vector(0)

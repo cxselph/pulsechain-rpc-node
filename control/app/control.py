@@ -43,6 +43,24 @@ ACTIONS = {
     "rollback": ("Roll back", "Returns to the version before the last update and restarts what it touches."),
 }
 
+# Wallet network settings shown on the page (PulseChain mainnet).
+CHAIN = {"name": "PulseChain", "chain_id": 369, "symbol": "PLS", "decimals": 18,
+         "explorer": "https://scan.pulsechain.com"}
+
+# Validator readiness, from the Prometheus recording rules in monitoring/.
+READINESS_QUERIES = {
+    "ready": "pulse:ready",
+    "synced": "pulse:synced",
+    "peers_ok": "pulse:peers_ok",
+    "clock_ok": "pulse:clock_ok",
+    "streak_days": "(time() - max_over_time(pulse:not_ready_at[45d])) / 86400 or count_over_time(pulse:ready[45d]) / 1440",
+    "uptime_pct": "avg_over_time(pulse:both_up[30d]) * 100",
+    "downtime_min": "round((1 - avg_over_time(pulse:both_up[30d])) * count_over_time(pulse:both_up[30d]))",
+    "outages": "ceil(changes(pulse:both_up[30d]) / 2)",
+    "history_days": "count_over_time(pulse:ready[30d]) / 1440",
+    "inbound_avg": "avg_over_time(pulse:inbound_peers[30d])",
+}
+
 LOGIN_WINDOW = 15 * 60
 LOGIN_MAX_PER_IP = 5
 LOGIN_MAX_TOTAL = 20
@@ -129,7 +147,7 @@ def create_app(config=None):
     def inject():
         if "csrf" not in session:
             session["csrf"] = secrets.token_urlsafe(32)
-        return {"csrf": session["csrf"], "hostname": PUBLIC_HOSTNAME or request.host, "ACTIONS": ACTIONS}
+        return {"csrf": session["csrf"], "hostname": PUBLIC_HOSTNAME or request.host, "ACTIONS": ACTIONS, "CHAIN": CHAIN}
 
     # --- routes ------------------------------------------------------------
     @app.get("/healthz")
@@ -207,6 +225,30 @@ def create_app(config=None):
 
 _cache = {"at": 0.0, "data": None}
 _cache_lock = threading.Lock()
+_readiness_cache = {"at": 0.0, "data": None}
+
+
+def prom_scalar(expr):
+    """First value of an instant query, or None (no data / Prometheus not installed)."""
+    q = urllib.request.quote(expr)
+    res = _get_json(f"{PROM_URL}/api/v1/query?query={q}")["data"]["result"]
+    return float(res[0]["value"][1]) if res else None
+
+
+def readiness():
+    """Validator readiness numbers; None when monitoring isn't installed. Cached 60 s."""
+    if _readiness_cache["data"] is not None and time.time() - _readiness_cache["at"] < 60:
+        return _readiness_cache["data"] or None
+    data = {}
+    try:
+        for key, expr in READINESS_QUERIES.items():
+            data[key] = prom_scalar(expr)
+    except Exception:  # noqa: BLE001 - Prometheus not installed or not answering
+        data = {}
+    if data and data.get("ready") is None:
+        data = {}  # recording rules not loaded yet
+    _readiness_cache.update(at=time.time(), data=data)
+    return data or None
 
 
 def _post_json(url, method):
@@ -320,6 +362,7 @@ def collect_status():
     s["running"] = read_json(os.path.join(STATE_DIR, "running.json"))
     s["queued"] = len(pending_requests())
     s["history"] = read_history(8)
+    s["readiness"] = readiness()
     s["health"] = health(s)
     with _cache_lock:
         _cache.update(at=time.time(), data=s)

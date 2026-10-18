@@ -225,7 +225,15 @@ nano monitoring/.env             # SMTP server/user/password, sender, ALERT_EMAI
 
 **Open Grafana** from your computer through an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 <user>@<node>`, then http://localhost:3000/grafana/ (user `admin`). Send a test email under Alerting → Contact points → email → Test.
 
-**Alerts** (email, repeated every 12 h while active): go-pulse or Prysm not answering, a scrape target down, the status helper stopped, initial sync stalled for 1 h, chain head stopped for 10 min, beacon more than 50 slots behind, fewer than 5 peers, beacon reports go-pulse offline after sync, a disk over 85%, chain disk full within 30 days at the current rate, and a client restarting repeatedly.
+**Validator readiness.** Prometheus records readiness signals every minute (`monitoring/prometheus/rules.yml`, unit-tested with `promtool`):
+- **synced:** both clients up, go-pulse not syncing, beacon ≤ 2 slots behind
+- **peers:** go-pulse ≥ 25, Prysm ≥ 30
+- **clock:** synchronized and within 0.5 s
+- **ready:** all three at once
+
+The **Validator readiness** dashboard shows ready-now, the streak toward 30 days in a row, 30-day uptime / downtime / outages, peers and inbound peers, clock offset, memory / swap / I/O headroom and chain-disk days left, plus the checks that have to be done by hand (drive wear, reboot drills, UPS, key plan). Prometheus keeps 45 days, so the 30-day window is always complete.
+
+**Alerts** (email, repeated every 12 h while active): go-pulse or Prysm not answering, a scrape target down, the status helper stopped, initial sync stalled for 1 h, chain head stopped for 10 min, beacon more than 50 slots behind, fewer than 5 peers, beacon reports go-pulse offline after sync, a disk over 85%, chain disk full within 30 days at the current rate, and a client restarting repeatedly, the clock out of sync for 15 min, and no inbound peers for 6 h after the initial sync (port forwards broken).
 
 **Password recovery.** Lost the Grafana password? Run `./monitoring/reset-grafana-password.sh` on the node. No old password is needed. Lost the SMTP password? Create a new one with your provider, update `monitoring/.env`, then run `./monitoring/restart.sh`.
 
@@ -280,6 +288,8 @@ There's no HSTS header on purpose. With a private CA it would lock out any devic
 A phone-friendly page, served through the HTTPS front end, that shows node health and offers a fixed set of actions:
 
 - **Status:** a green / yellow / red banner; sync progress (with an ETA if monitoring is installed); peers; beacon; disk; Debian updates; go-pulse / Prysm versions; the fork commit; and whether `main` has updates (with the commit list and any image-pin changes). It refreshes on its own.
+- **Wallet settings:** network name, RPC URL (`https://<host>`), chain ID 369, symbol, explorer and WebSocket, each with a Copy button. In a browser with MetaMask (desktop extension or MetaMask's in-app browser), **Add to MetaMask** fills them in.
+- **Validator readiness** (if monitoring is installed): ready now and which part fails, the streak toward 30 days, 30-day uptime, downtime, outages and inbound peers.
 - **Actions** (each behind a confirm screen, one at a time, all logged with output):
   - Check for updates
   - Apply update
