@@ -61,3 +61,12 @@ li.fail .dot { background: var(--bad); }
 @media (max-width: 520px) { main { padding: 12px; } .top { padding: 10px 12px; } .brand span { display: none; } }
 dl.copylist dd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 button.copy { padding: 3px 10px; font-size: 0.85rem; border-radius: 8px; }
+.console-head { margin-bottom: 10px; }
+.console-sync { margin: 0 0 10px; font-weight: 600; }
+.row.tight { margin-top: 0; }
+button.tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+label.toggle { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--fg); }
+pre.console { background: #0d0d0c; color: #d6d6d0; border-color: #2a2a27; height: 68vh; max-height: none; font-size: 0.78rem; line-height: 1.35; }
+pre.console div { white-space: pre-wrap; word-break: break-all; }
+pre.console .warn { color: #e3b341; }
+pre.console .err { color: #ff6b6b; }

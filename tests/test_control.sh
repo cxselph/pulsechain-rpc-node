@@ -63,12 +63,17 @@ fi
 rm -rf "${sv}"
 
 # --- Python tests --------------------------------------------------------------------
-if (cd "${CTL}" && python3 -m unittest tests/test_node_control.py >/dev/null 2>&1); then
-  pass "node-control helper tests"
+if (cd "${CTL}" && python3 -m unittest tests/test_node_control.py tests/test_node_logs.py >/dev/null 2>&1); then
+  pass "node-control and node-logs helper tests"
 else
-  (cd "${CTL}" && python3 -m unittest tests/test_node_control.py) || true
-  fail "node-control helper tests"
+  (cd "${CTL}" && python3 -m unittest tests/test_node_control.py tests/test_node_logs.py) || true
+  fail "node-control / node-logs helper tests"
 fi
+grep -q 'node-control-logs.service' "${CTL}/install.sh" && grep -q '^User=@USER@$' "${CTL}/systemd/node-control-logs.service" \
+  && grep -q '^Restart=always$' "${CTL}/systemd/node-control-logs.service" \
+  && pass "console log helper: installed by install.sh, runs as the repo owner, restarts on failure" || fail "node-control-logs.service setup"
+grep -q 'textContent = l' "${CTL}/app/static/app.js" && ! grep -q 'innerHTML = l' "${CTL}/app/static/app.js" \
+  && pass "console renders log lines as text, never HTML" || fail "console must render log lines with textContent"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   if docker build -q -t pulse-control:test "${CTL}" >/dev/null \
      && docker run --rm --network none -v "${CTL}:/src:ro" -w /src --entrypoint python3 pulse-control:test -m unittest tests/test_app.py >/dev/null 2>&1; then
