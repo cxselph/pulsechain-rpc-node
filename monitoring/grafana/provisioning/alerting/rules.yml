@@ -288,7 +288,10 @@ groups:
             datasourceUid: prometheus
             model:
               refId: A
-              expr: 'count(predict_linear(node_filesystem_avail_bytes{mountpoint="/blockchain"}[3d], 30 * 86400) < 0 and on(instance) count_over_time(node_filesystem_avail_bytes{mountpoint="/blockchain"}[3d]) > 8000 and on(instance) pulse_el_syncing == 0)'
+              # The 3-day window must be (nearly) all synced: right after the initial
+              # sync it still holds the sync's fast growth and would cry wolf.
+              # The offset 62h terms require data from about 2.6 days ago.
+              expr: 'count(predict_linear(node_filesystem_avail_bytes{mountpoint="/blockchain"}[3d], 30 * 86400) < 0 and on(instance) node_filesystem_avail_bytes{mountpoint="/blockchain"} offset 62h and on() max(avg_over_time(pulse_el_syncing[3d])) < 0.01 and on() count(pulse_el_syncing offset 62h) > 0)'
               instant: true
               range: false
           - refId: C
@@ -304,7 +307,7 @@ groups:
         execErrState: Error
         labels: { severity: warning }
         annotations:
-          summary: 'At the last 3 days'' growth rate, /blockchain will be full within 30 days. (Ignored during the initial sync, which grows fast.)'
+          summary: 'At the last 3 days'' growth rate, /blockchain will be full within 30 days. (Only checked once the node has been synced for the whole 3 days, so the initial sync''s fast growth doesn''t count.)'
           description: 'Plan to grow the chain disk in Proxmox, or check what is growing.'
       - uid: pulse-restart-loop
         title: 'Node client restarting repeatedly'
