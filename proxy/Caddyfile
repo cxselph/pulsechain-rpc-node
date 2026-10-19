@@ -43,7 +43,11 @@
 		path /
 	}
 	handle @rpc {
-		reverse_proxy 127.0.0.1:{$HTTP_PORT}
+		# go-pulse accepts an IP Host header but checks names against
+		# --http.vhosts, so send the upstream address instead of the public name.
+		reverse_proxy 127.0.0.1:{$HTTP_PORT} {
+			header_up Host {upstream_hostport}
+		}
 	}
 
 	# Everything else: the control page (control/). If it isn't installed or

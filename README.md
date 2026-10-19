@@ -78,7 +78,7 @@ If you need ready-to-run node hardware, you can find pre-built options at [valid
 
 Checkpoint sync trusts [checkpoint.pulsechain.com](https://checkpoint.pulsechain.com) (same URL as the official PulseChain docs). That is a trusted third party for the initial beacon state. Prysm also recommends pairing it with a weak-subjectivity checkpoint if you want extra assurance against a long-range attack.
 
-CORS / vhosts default to `*` so LAN web wallets can reach the node. A page you visit can also call that RPC if it can reach the LAN IP — keep this on a trusted network.
+Web pages from other sites can't use the RPC: CORS allows no other origins, WebSocket origins are limited to localhost, and HTTP only accepts host names in `HTTP_VHOSTS` (default `localhost`; requests by IP always work). This stops a page you visit from quietly querying your node. Wallet apps, browser-extension wallets (MetaMask, Rabby) and scripts aren't affected. If a web dapp must call the node directly, list its origin in `HTTP_CORS_DOMAINS` / `WS_ORIGINS` in `.env`.
 
 The installer warns if the host itself has a public IP and UFW is not active. That is the typical VPS misconfiguration (an unauthenticated public RPC). Home machines behind NAT are fine.
 

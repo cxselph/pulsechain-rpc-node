@@ -51,13 +51,18 @@ services:
       - --http.addr=${HTTP_ADDR:-0.0.0.0}
       - --http.port=${HTTP_PORT:-8545}
       - --http.api=eth,net,web3,txpool
-      - --http.corsdomain=*
-      - --http.vhosts=*
+      # Browser pages from other sites may not call the RPC (wallet apps and
+      # extensions don't need CORS). Requests by IP always pass the vhosts check;
+      # by name only localhost (the HTTPS front end sends the upstream IP).
+      - --http.corsdomain=${HTTP_CORS_DOMAINS:-}
+      - --http.vhosts=${HTTP_VHOSTS:-localhost}
       - --ws
       - --ws.addr=${WS_ADDR:-0.0.0.0}
       - --ws.port=${WS_PORT:-8546}
       - --ws.api=eth,net,web3,txpool
-      - --ws.origins=*
+      # Browser pages may not open a WebSocket to the node. Wallet apps send no
+      # Origin header, so geth skips this check for them.
+      - --ws.origins=${WS_ORIGINS:-}
       - --maxpeers=150
       # Prometheus metrics (localhost only): /debug/metrics/prometheus
       - --metrics
