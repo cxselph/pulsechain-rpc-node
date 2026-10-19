@@ -79,3 +79,38 @@ tests:
       - expr: 'ceil(changes(pulse:both_up[30d]) / 2)'
         eval_time: 120m
         exp_samples: [{labels: '{}', value: 1}]
+
+  # Chain disk forecast (Grafana rule pulse-disk-trend; test_monitoring.sh checks
+  # the expression below matches rules.yml). 1-minute samples.
+  # Like the real install: the initial sync fills over half the disk in a day, then the node
+  # is synced with no growth. The old rule fired at 36 h (the window was mostly
+  # sync growth). Now: no alert at 36 h, nor once 3 synced days have passed.
+  - interval: 1m
+    input_series:
+      - {series: 'node_filesystem_avail_bytes{instance="n",mountpoint="/blockchain"}', values: '2500000000-1000000x1440 1060000000+0x4380'}
+      - {series: 'pulse_el_syncing{instance="n"}', values: '1x1440 0x4380'}
+    promql_expr_test:
+      - expr: 'count(predict_linear(node_filesystem_avail_bytes{mountpoint="/blockchain"}[3d], 30 * 86400) < 0 and on(instance) node_filesystem_avail_bytes{mountpoint="/blockchain"} offset 62h and on() max(avg_over_time(pulse_el_syncing[3d])) < 0.01 and on() count(pulse_el_syncing offset 62h) > 0)'
+        eval_time: 36h
+        exp_samples: []
+      - expr: 'count(predict_linear(node_filesystem_avail_bytes{mountpoint="/blockchain"}[3d], 30 * 86400) < 0 and on(instance) node_filesystem_avail_bytes{mountpoint="/blockchain"} offset 62h and on() max(avg_over_time(pulse_el_syncing[3d])) < 0.01 and on() count(pulse_el_syncing offset 62h) > 0)'
+        eval_time: 97h
+        exp_samples: []
+  # Synced the whole time but filling fast: alert.
+  - interval: 1m
+    input_series:
+      - {series: 'node_filesystem_avail_bytes{instance="n",mountpoint="/blockchain"}', values: '20000000-2000x5760'}
+      - {series: 'pulse_el_syncing{instance="n"}', values: '0x5760'}
+    promql_expr_test:
+      - expr: 'count(predict_linear(node_filesystem_avail_bytes{mountpoint="/blockchain"}[3d], 30 * 86400) < 0 and on(instance) node_filesystem_avail_bytes{mountpoint="/blockchain"} offset 62h and on() max(avg_over_time(pulse_el_syncing[3d])) < 0.01 and on() count(pulse_el_syncing offset 62h) > 0)'
+        eval_time: 4d
+        exp_samples: [{labels: '{}', value: 1}]
+  # Synced the whole time, slow growth (a minute of catch-up after a reboot): no alert.
+  - interval: 1m
+    input_series:
+      - {series: 'node_filesystem_avail_bytes{instance="n",mountpoint="/blockchain"}', values: '20000000-1x5760'}
+      - {series: 'pulse_el_syncing{instance="n"}', values: '0x4000 1x1 0x1758'}
+    promql_expr_test:
+      - expr: 'count(predict_linear(node_filesystem_avail_bytes{mountpoint="/blockchain"}[3d], 30 * 86400) < 0 and on(instance) node_filesystem_avail_bytes{mountpoint="/blockchain"} offset 62h and on() max(avg_over_time(pulse_el_syncing[3d])) < 0.01 and on() count(pulse_el_syncing offset 62h) > 0)'
+        eval_time: 4d
+        exp_samples: []

@@ -112,6 +112,14 @@ done
 pass ".env.example lists the SMTP and recipient settings"
 if git -C "${ROOT}" check-ignore -q monitoring/.env; then pass "monitoring/.env is gitignored"; else fail "monitoring/.env must be gitignored (it holds the SMTP password)"; fi
 
+# The disk-forecast expression promtool tests (readiness_test.yml) must be the one Grafana runs.
+disk_expr="$(grep -A1 'Chain disk forecast' "${ROOT}/tests/promtool/readiness_test.yml" >/dev/null && grep -m1 -oE "count\(predict_linear.*\)'$" "${ROOT}/tests/promtool/readiness_test.yml" | sed "s/'\$//; s/''/'/g")"
+if [[ -n "${disk_expr}" ]] && grep -qF "expr: '${disk_expr}'" "${rules}"; then
+  pass "disk forecast rule matches its promtool test"
+else
+  fail "disk forecast expression in rules.yml differs from tests/promtool/readiness_test.yml"
+fi
+
 # --- Prometheus config is valid and the readiness rules behave (promtool) -------
 prom_image="$(grep -E '^\s+image: prom/prometheus' "${compose}" | awk '{print $2}')"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
