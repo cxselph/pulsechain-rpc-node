@@ -56,6 +56,8 @@ grep -qE 'reverse_proxy 127\.0\.0\.1:\{\$HTTP_PORT\}' "${caddyfile}" && grep -qE
   && grep -qE 'reverse_proxy 127\.0\.0\.1:3000' "${caddyfile}" && pass "upstreams are 127.0.0.1 only" || fail "Caddy upstreams should all be 127.0.0.1"
 awk '/@rpc \{/,/\}/' "${caddyfile}" | grep -q 'method POST OPTIONS' && awk '/@rpc \{/,/\}/' "${caddyfile}" | grep -qE 'path /$' \
   && pass "RPC route limited to POST/OPTIONS on /" || fail "RPC route should match only POST/OPTIONS on /"
+awk '/handle @rpc \{/,/^\t\}/' "${caddyfile}" | grep -qE 'header_up Host \{upstream_hostport\}' \
+  && pass "RPC upstream gets an IP Host header (passes go-pulse --http.vhosts)" || fail "RPC route should send header_up Host {upstream_hostport}"
 grep -q '{{.Host}}' "${PROXY}/site/index.html" && pass "landing page shows the hostname" || fail "landing page should template {{.Host}}"
 
 # --- Certificate validator (cert_problems) ----------------------------------------

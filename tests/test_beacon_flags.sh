@@ -158,7 +158,7 @@ run_compose_config() {
       -u BEACON_HTTP_PORT -u BEACON_GRPC_PORT \
       -u BEACON_HTTP_HOST -u BEACON_GRPC_HOST -u GETH_CACHE \
       -u GETH_P2P_PORT -u BEACON_P2P_TCP_PORT -u BEACON_P2P_UDP_PORT \
-      -u GETH_IMAGE -u BEACON_IMAGE \
+      -u GETH_IMAGE -u BEACON_IMAGE -u HTTP_CORS_DOMAINS -u HTTP_VHOSTS -u WS_ORIGINS \
       docker compose --env-file /dev/null -f "$COMPOSE" config 2>&1
   )" || {
     fail "docker compose config failed: $cfg"
@@ -228,6 +228,20 @@ if CFG="$(run_compose_config)"; then
   assert_contains "$GETH_CMD" '--http.addr=0.0.0.0' \
     "compose config: --http.addr=0.0.0.0" \
     "compose config missing default --http.addr=0.0.0.0"
+  assert_contains "$GETH_CMD" '--http.vhosts=localhost$' \
+    "compose config: --http.vhosts=localhost" \
+    "compose config should default --http.vhosts to localhost"
+  assert_contains "$GETH_CMD" '--http.corsdomain=$' \
+    "compose config: no CORS origins by default" \
+    "compose config should default --http.corsdomain to empty"
+  assert_contains "$GETH_CMD" '--ws.origins=$' \
+    "compose config: no extra WebSocket origins by default" \
+    "compose config should default --ws.origins to empty"
+  if printf '%s\n' "$GETH_CMD" | grep -qE -- '--(http\.corsdomain|http\.vhosts|ws\.origins)=\*'; then
+    fail "compose config must not default CORS / vhosts / WebSocket origins to *"
+  else
+    pass "compose config: no * for CORS / vhosts / WebSocket origins"
+  fi
   assert_contains "$GETH_CMD" '--port=30303' \
     "compose config: --port=30303" \
     "compose config missing default geth P2P port"
