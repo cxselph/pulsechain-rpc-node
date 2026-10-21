@@ -114,3 +114,40 @@ tests:
       - expr: 'count(predict_linear(node_filesystem_avail_bytes{mountpoint="/blockchain"}[3d], 30 * 86400) < 0 and on(instance) node_filesystem_avail_bytes{mountpoint="/blockchain"} offset 62h and on() max(avg_over_time(pulse_el_syncing[3d])) < 0.01 and on() count(pulse_el_syncing offset 62h) > 0)'
         eval_time: 4d
         exp_samples: []
+  # Chain disk days left (dashboard tile; test_monitoring.sh checks the expression
+  # below matches validator-readiness.json). 10-minute samples.
+  # Like the real install: a day of initial sync fills over half the disk, then the
+  # node is synced with no growth. The old tile showed ~4 weeks (red) for a week.
+  # Now: nothing until 7 synced days, then far over 180 days (green).
+  - interval: 10m
+    input_series:
+      - {series: 'node_filesystem_avail_bytes{instance="n",mountpoint="/blockchain"}', values: '2500000000-10000000x144 1060000000+0x1200'}
+      - {series: 'pulse_el_syncing{instance="n"}', values: '1x144 0x1200'}
+    promql_expr_test:
+      - expr: 'count((node_filesystem_avail_bytes{mountpoint="/blockchain"} / clamp_min(-deriv(node_filesystem_avail_bytes{mountpoint="/blockchain"}[7d]), 1) / 86400 and on(instance) node_filesystem_avail_bytes{mountpoint="/blockchain"} offset 6d and on() max(avg_over_time(pulse_el_syncing[7d])) < 0.01 and on() count(pulse_el_syncing offset 6d) > 0) >= 0)'
+        eval_time: 3d
+        exp_samples: []
+      - expr: 'count((node_filesystem_avail_bytes{mountpoint="/blockchain"} / clamp_min(-deriv(node_filesystem_avail_bytes{mountpoint="/blockchain"}[7d]), 1) / 86400 and on(instance) node_filesystem_avail_bytes{mountpoint="/blockchain"} offset 6d and on() max(avg_over_time(pulse_el_syncing[7d])) < 0.01 and on() count(pulse_el_syncing offset 6d) > 0) >= 0)'
+        eval_time: 6d12h
+        exp_samples: []
+      - expr: 'count((node_filesystem_avail_bytes{mountpoint="/blockchain"} / clamp_min(-deriv(node_filesystem_avail_bytes{mountpoint="/blockchain"}[7d]), 1) / 86400 and on(instance) node_filesystem_avail_bytes{mountpoint="/blockchain"} offset 6d and on() max(avg_over_time(pulse_el_syncing[7d])) < 0.01 and on() count(pulse_el_syncing offset 6d) > 0) > 180)'
+        eval_time: 9d
+        exp_samples: [{labels: '{}', value: 1}]
+  # Synced the whole time but filling fast (~6 days left): shown, under 90 (red).
+  - interval: 10m
+    input_series:
+      - {series: 'node_filesystem_avail_bytes{instance="n",mountpoint="/blockchain"}', values: '2000000000-1000000x1200'}
+      - {series: 'pulse_el_syncing{instance="n"}', values: '0x1200'}
+    promql_expr_test:
+      - expr: 'count((node_filesystem_avail_bytes{mountpoint="/blockchain"} / clamp_min(-deriv(node_filesystem_avail_bytes{mountpoint="/blockchain"}[7d]), 1) / 86400 and on(instance) node_filesystem_avail_bytes{mountpoint="/blockchain"} offset 6d and on() max(avg_over_time(pulse_el_syncing[7d])) < 0.01 and on() count(pulse_el_syncing offset 6d) > 0) < 90)'
+        eval_time: 8d
+        exp_samples: [{labels: '{}', value: 1}]
+  # Synced, slow growth with a 10-minute catch-up after a reboot: still shown, green.
+  - interval: 10m
+    input_series:
+      - {series: 'node_filesystem_avail_bytes{instance="n",mountpoint="/blockchain"}', values: '2000000000-1000x1200'}
+      - {series: 'pulse_el_syncing{instance="n"}', values: '0x1000 1x1 0x199'}
+    promql_expr_test:
+      - expr: 'count((node_filesystem_avail_bytes{mountpoint="/blockchain"} / clamp_min(-deriv(node_filesystem_avail_bytes{mountpoint="/blockchain"}[7d]), 1) / 86400 and on(instance) node_filesystem_avail_bytes{mountpoint="/blockchain"} offset 6d and on() max(avg_over_time(pulse_el_syncing[7d])) < 0.01 and on() count(pulse_el_syncing offset 6d) > 0) > 180)'
+        eval_time: 8d
+        exp_samples: [{labels: '{}', value: 1}]

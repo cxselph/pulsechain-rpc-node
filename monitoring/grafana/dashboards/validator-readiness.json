@@ -1400,7 +1400,7 @@
       "id": 22,
       "type": "stat",
       "title": "Chain disk days left",
-      "description": "At the last 7 days' growth rate (fast during the initial sync).",
+      "description": "At the last 7 days' growth rate. Only shown once go-pulse has been synced for the whole 7 days, so a sync's fast growth doesn't count.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1417,7 +1417,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "node_filesystem_avail_bytes{mountpoint=\"/blockchain\"} / (-deriv(node_filesystem_avail_bytes{mountpoint=\"/blockchain\"}[7d]) > 0) / 86400",
+          "expr": "node_filesystem_avail_bytes{mountpoint=\"/blockchain\"} / clamp_min(-deriv(node_filesystem_avail_bytes{mountpoint=\"/blockchain\"}[7d]), 1) / 86400 and on(instance) node_filesystem_avail_bytes{mountpoint=\"/blockchain\"} offset 6d and on() max(avg_over_time(pulse_el_syncing[7d])) < 0.01 and on() count(pulse_el_syncing offset 6d) > 0",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -1440,6 +1440,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "d",
+          "noValue": "Waiting for 7 synced days",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
