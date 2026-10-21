@@ -60,11 +60,16 @@
   const pauseBtn = document.getElementById("console-pause");
   const stateEl = document.getElementById("console-state");
   const syncEl = document.getElementById("console-sync");
+  const wrapBox = document.getElementById("console-wrap");
+  const fullBtn = document.getElementById("console-full");
+  const box = document.getElementById("console-box");
   const SYNC = /sync|import|snap|heal|forkchoice|download|checkpoint|backfill|head|peer|pivot|chain/i;
   const MAX = 500;
   let tab = localStorage.getItem("console-tab") || root.dataset.tabs.split(",")[0];
   let seq = 0, paused = false, lines = [];
   try { filter.checked = localStorage.getItem("console-filter") === "1"; } catch (e) {}
+  try { wrapBox.checked = localStorage.getItem("console-wrap") !== "0"; } catch (e) {}
+  out.classList.toggle("nowrap", !wrapBox.checked);
 
   function level(line) {
     if (/\b(ERROR|CRIT|FATAL)\b|level=(error|fatal)/i.test(line)) return "err";
@@ -133,6 +138,21 @@
   }
   root.addEventListener("click", (ev) => { const b = ev.target.closest(".tab"); if (b) { select(b.dataset.tab); poll(); } });
   filter.addEventListener("change", () => { try { localStorage.setItem("console-filter", filter.checked ? "1" : "0"); } catch (e) {} render(); });
+  wrapBox.addEventListener("change", () => {
+    try { localStorage.setItem("console-wrap", wrapBox.checked ? "1" : "0"); } catch (e) {}
+    out.classList.toggle("nowrap", !wrapBox.checked);
+  });
+  // Full screen where the browser allows it for a page element (not iPhone Safari).
+  if (box.requestFullscreen && document.fullscreenEnabled) {
+    fullBtn.hidden = false;
+    fullBtn.addEventListener("click", () => {
+      if (document.fullscreenElement) document.exitFullscreen(); else box.requestFullscreen().catch(() => {});
+    });
+    document.addEventListener("fullscreenchange", () => {
+      fullBtn.textContent = document.fullscreenElement ? "Exit full screen" : "Full screen";
+      out.scrollTop = out.scrollHeight;
+    });
+  }
   pauseBtn.addEventListener("click", () => { paused = !paused; pauseBtn.textContent = paused ? "Resume" : "Pause"; stateEl.textContent = paused ? "paused" : ""; });
   select(tab); poll(); pollSync();
 })();

@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Console{% endblock %}
+{% block main_attrs %} class="wide"{% endblock %}
 {% block content %}
+<div class="console-box" id="console-box">
 <section class="card console-head" id="console" data-tabs="{{ logs | join(',') }}">
   <p id="console-sync" class="console-sync">Loading sync status…</p>
   <div class="row tight">
@@ -8,10 +10,13 @@
     <button class="tab" data-tab="{{ key }}">{{ label }}</button>
     {% endfor %}
     <label class="toggle"><input type="checkbox" id="console-filter"> sync lines only</label>
+    <label class="toggle"><input type="checkbox" id="console-wrap" checked> wrap lines</label>
     <button id="console-pause">Pause</button>
+    <button id="console-full" hidden>Full screen</button>
     <span class="hint" id="console-state"></span>
   </div>
 </section>
 <pre class="console" id="console-out" aria-live="off"></pre>
+</div>
 <p class="hint foot">Read-only · last 500 lines · updates every 3 s · <a href="{{ url_for('index') }}">← Back to the dashboard</a></p>
 {% endblock %}
