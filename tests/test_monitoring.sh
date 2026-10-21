@@ -119,6 +119,13 @@ if [[ -n "${disk_expr}" ]] && grep -qF "expr: '${disk_expr}'" "${rules}"; then
 else
   fail "disk forecast expression in rules.yml differs from tests/promtool/readiness_test.yml"
 fi
+# Same for the dashboard's "Chain disk days left" tile.
+tile_expr="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print([p for p in d["panels"] if p.get("title")=="Chain disk days left"][0]["targets"][0]["expr"])' "${MON}/grafana/dashboards/validator-readiness.json" 2>/dev/null)"
+if [[ -n "${tile_expr}" ]] && grep -qF "count((${tile_expr}) " "${ROOT}/tests/promtool/readiness_test.yml"; then
+  pass "disk days-left tile matches its promtool test"
+else
+  fail "Chain disk days left expression in validator-readiness.json differs from tests/promtool/readiness_test.yml"
+fi
 
 # --- Prometheus config is valid and the readiness rules behave (promtool) -------
 prom_image="$(grep -E '^\s+image: prom/prometheus' "${compose}" | awk '{print $2}')"
