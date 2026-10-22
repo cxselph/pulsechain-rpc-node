@@ -44,6 +44,8 @@ ACTIONS = {
     "check-updates": "Check for updates",
     "apply-update": "Apply update",
     "rollback": "Roll back the last update",
+    "stop-node": "Stop the node (go-pulse + Prysm)",
+    "start-node": "Start the node (go-pulse + Prysm)",
 }
 
 
@@ -376,6 +378,27 @@ def act_rollback(log):
     return ok, f"rolled back {head[:7]} → {target[:7]}: " + "; ".join(done)
 
 
+def act_stop(log):
+    # The page asked for the password; this file drives its "stopped on purpose" banner
+    # and stays until Start. The containers stay down across reboots too (compose down).
+    write_json(state("stopped.json"), {"at": now()})
+    rc, out = run(["./stop.sh"], timeout=600)
+    log.append("$ ./stop.sh\n" + out)
+    return rc == 0, ("node stopped: it stays down until Start node" if rc == 0 else "stop FAILED (see log)")
+
+
+def act_start(log):
+    rc, out = run(["./start.sh"], timeout=600)
+    log.append("$ ./start.sh\n" + out)
+    if rc != 0:
+        return False, "start FAILED (see log)"
+    try:
+        os.remove(state("stopped.json"))
+    except FileNotFoundError:
+        pass
+    return True, "node started"
+
+
 HANDLERS = {
     "restart-node": act_restart([]),
     "restart-geth": act_restart(["geth"]),
@@ -383,6 +406,8 @@ HANDLERS = {
     "check-updates": act_check_updates,
     "apply-update": act_apply_update,
     "rollback": act_rollback,
+    "stop-node": act_stop,
+    "start-node": act_start,
 }
 assert set(HANDLERS) == set(ACTIONS)
 

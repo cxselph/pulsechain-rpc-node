@@ -153,6 +153,53 @@ class AppTest(unittest.TestCase):
         self.assertEqual(len(self.requests()), 1)
         self.assertIn("still running", self.c.get("/", base_url=BASE).get_data(as_text=True))
 
+    def test_stop_needs_password_start_does_not(self):
+        self.login()
+        tok = self.csrf("/")
+        self.assertIn("Stop the node", self.c.get("/", base_url=BASE).get_data(as_text=True))
+        html = self.c.post("/action/stop-node", base_url=BASE, data={"csrf": tok}).get_data(as_text=True)
+        self.assertIn('name="password"', html)                           # confirm screen asks for it
+        r = self.c.post("/action/stop-node", base_url=BASE, data={"csrf": tok, "confirmed": "yes"})
+        self.assertEqual(r.status_code, 401); self.assertEqual(self.requests(), [])
+        r = self.c.post("/action/stop-node", base_url=BASE, data={"csrf": tok, "confirmed": "yes", "password": "nope"})
+        self.assertEqual(r.status_code, 401); self.assertIn("Wrong password", r.get_data(as_text=True))
+        self.assertEqual(self.requests(), [])
+        r = self.c.post("/action/stop-node", base_url=BASE, data={"csrf": tok, "confirmed": "yes", "password": PASSWORD})
+        self.assertEqual(r.status_code, 302); self.assertEqual(len(self.requests()), 1)
+        for f in self.requests():
+            os.remove(os.path.join(self.req, f))
+        # Start: confirm screen without a password field, then straight through.
+        self.status = fake_status(stopped={"at": "2026-10-17T19:00:00+00:00"})
+        html = self.c.post("/action/start-node", base_url=BASE, data={"csrf": tok}).get_data(as_text=True)
+        self.assertNotIn('name="password"', html)
+        r = self.c.post("/action/start-node", base_url=BASE, data={"csrf": tok, "confirmed": "yes"})
+        self.assertEqual(r.status_code, 302); self.assertEqual(len(self.requests()), 1)
+
+    def test_stop_password_counts_toward_lockout(self):
+        self.login()
+        tok = self.csrf("/")
+        for _ in range(control.LOGIN_MAX_PER_IP):
+            self.c.post("/action/stop-node", base_url=BASE, data={"csrf": tok, "confirmed": "yes", "password": "x"})
+        r = self.c.post("/action/stop-node", base_url=BASE, data={"csrf": tok, "confirmed": "yes", "password": PASSWORD})
+        self.assertEqual(r.status_code, 429); self.assertEqual(self.requests(), [])
+
+    def test_stopped_banner_and_buttons(self):
+        self.login()
+        self.status = fake_status(stopped={"at": "2026-10-17T19:00:00+00:00"})
+        self.assertEqual(self.status["health"][0], "red")
+        html = self.c.get("/", base_url=BASE).get_data(as_text=True)
+        self.assertIn("stopped on purpose", html); self.assertIn("Start the node", html)
+        self.assertNotIn("Stop the node", html); self.assertNotIn("Restart go-pulse", html)
+        tok = self.csrf("/")
+        self.c.post("/action/restart-geth", base_url=BASE, data={"csrf": tok, "confirmed": "yes"})
+        self.assertEqual(self.requests(), [])                            # refused while stopped
+        # Stopped over SSH (no stopped.json): Start is offered, Stop isn't.
+        st = fake_status(); st["helper"]["containers"] = {"pulse-geth": {"running": False, "status": "not installed"},
+                                                           "pulse-beacon": {"running": False, "status": "not installed"}}
+        self.status = st
+        html = self.c.get("/", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Start the node", html); self.assertNotIn("Stop the node", html)
+
     def test_action_csrf_and_unknown(self):
         self.login()
         self.assertEqual(self.c.post("/action/restart-geth", base_url=BASE, data={"confirmed": "yes"}).status_code, 400)

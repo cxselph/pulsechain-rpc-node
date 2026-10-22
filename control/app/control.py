@@ -48,7 +48,17 @@ ACTIONS = {
                      "Fast-forwards to what is merged on GitHub main, then restarts only what the "
                      "update touches (pinned images only)."),
     "rollback": ("Roll back", "Returns to the version before the last update and restarts what it touches."),
+    "stop-node": ("Stop the node",
+                  "Stops go-pulse and Prysm and leaves them stopped, even across a reboot, until you press "
+                  "Start node. Wallets using this RPC stop working, the downtime counts against uptime and "
+                  "the readiness streak, and Grafana will email a node-down alert."),
+    "start-node": ("Start the node", "Starts go-pulse and Prysm. They catch up with the chain within a few minutes."),
 }
+
+# Actions that ask for the control page password again on the confirm screen.
+REAUTH_ACTIONS = {"stop-node"}
+# What can still run while the node is stopped on purpose.
+WHILE_STOPPED = {"start-node", "check-updates"}
 
 # Wallet network settings shown on the page (PulseChain mainnet).
 CHAIN = {"name": "PulseChain", "chain_id": 369, "symbol": "PLS", "decimals": 18,
@@ -158,7 +168,7 @@ def create_app(config=None):
     def inject():
         if "csrf" not in session:
             session["csrf"] = secrets.token_urlsafe(32)
-        return {"csrf": session["csrf"], "hostname": PUBLIC_HOSTNAME or request.host, "ACTIONS": ACTIONS, "CHAIN": CHAIN}
+        return {"csrf": session["csrf"], "hostname": PUBLIC_HOSTNAME or request.host, "ACTIONS": ACTIONS, "REAUTH_ACTIONS": REAUTH_ACTIONS, "CHAIN": CHAIN}
 
     # --- routes ------------------------------------------------------------
     @app.get("/healthz")
@@ -212,11 +222,23 @@ def create_app(config=None):
         s = collect_status()
         if request.form.get("confirmed") != "yes":
             return render_template("confirm.html", name=name, s=s)
+        ip = request.remote_addr or "?"
+        if name in REAUTH_ACTIONS:
+            if too_many_failures(ip):
+                app.logger.warning("%s refused for %s: too many password attempts", name, ip)
+                return render_template("confirm.html", name=name, s=s,
+                                       error="Too many attempts. Wait 15 minutes and try again."), 429
+            pw_hash = app.config["PASSWORD_HASH"]
+            password = request.form.get("password", "")
+            if not (pw_hash and password and check_password_hash(pw_hash, password)):
+                note_failure(ip)
+                app.logger.warning("%s refused for %s: wrong password", name, ip)
+                return render_template("confirm.html", name=name, s=s, error="Wrong password."), 401
         problem = action_blocked(name, s)
         if problem:
             session["message"] = ("error", problem)
             return redirect(url_for("index"))
-        submit_request(name, request.remote_addr or "?")
+        submit_request(name, ip)
         session["message"] = ("ok", f"{ACTIONS[name][0]}: started. This page updates as it runs.")
         return redirect(url_for("index"))
 
@@ -422,6 +444,7 @@ def collect_status():
     helper = read_json(os.path.join(STATE_DIR, "status.json"))
     s["helper"] = helper
     s["running"] = read_json(os.path.join(STATE_DIR, "running.json"))
+    s["stopped"] = read_json(os.path.join(STATE_DIR, "stopped.json"))
     s["queued"] = len(pending_requests())
     s["history"] = read_history(8)
     s["readiness"] = readiness()
@@ -461,6 +484,9 @@ def health(s):
     """(level, headline) for the banner: green / yellow / red."""
     el, cl, disk, helper = s["el"], s["cl"], s.get("disk"), s.get("helper") or {}
     problems, warnings = [], []
+    if s.get("stopped"):
+        return ("red", f"Node stopped on purpose ({fmt_ago(s['stopped'].get('at'))}). "
+                       "It stays down until you press Start node.")
     if not el.get("up"):
         problems.append("go-pulse is not answering")
     if not cl.get("up"):
@@ -500,6 +526,10 @@ def action_blocked(name, s):
     if not s.get("helper"):
         return "The node-control helper isn't reporting, so nothing would carry this out. Check ./control/status.sh."
     repo = s["helper"].get("repo", {})
+    if s.get("stopped") and name not in WHILE_STOPPED:
+        return "The node is stopped on purpose. Press Start node first."
+    if name == "stop-node" and s.get("stopped"):
+        return "The node is already stopped."
     if name == "apply-update":
         if not repo.get("behind"):
             return "Already up to date. Use Check for updates first."

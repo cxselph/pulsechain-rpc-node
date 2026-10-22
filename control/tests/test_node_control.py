@@ -178,6 +178,19 @@ class NodeControlTest(unittest.TestCase):
         areas, manual = nc.classify(["control/node-logs.py"])
         self.assertFalse(any(areas.values())); self.assertEqual(manual, [])
 
+    def test_stop_then_start(self):
+        for name in ("stop.sh", "start.sh"):
+            self.write(name, f'#!/bin/sh\necho "{name} ran" >> "{self.calls}"\n', mode=0o755, root=self.repo)
+        self.request("stop-node"); nc.process()
+        h = self.history()[-1]
+        self.assertTrue(h["ok"], h); self.assertIn("stays down until Start node", h["summary"])
+        self.assertIn("stop.sh ran", self.calls_log())
+        self.assertTrue(os.path.exists(os.path.join(self.state, "stopped.json")))
+        self.request("start-node", rid="00000000000000d2"); nc.process()
+        h = self.history()[-1]
+        self.assertTrue(h["ok"], h); self.assertIn("start.sh ran", self.calls_log())
+        self.assertFalse(os.path.exists(os.path.join(self.state, "stopped.json")))
+
     def test_restart_actions_call_compose(self):
         self.request("restart-geth"); nc.process()
         self.assertIn("docker compose restart geth", self.calls_log())
