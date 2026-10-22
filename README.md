@@ -298,8 +298,9 @@ A phone-friendly page, served through the HTTPS front end, that shows node healt
   - Apply update
   - Roll back
   - Restart node / go-pulse / Prysm
+  - Stop node (asks for the control page password again) / Start node. A stopped node stays down, even across reboots, until Start, and the page shows a red "stopped on purpose" banner. Wrong passwords count toward the sign-in lockout.
 
-**How it stays safe.** The page runs in a container with no Docker socket, a read-only filesystem, no capabilities, and no access to the repo. Pressing a button only drops a small request file in `/var/lib/node-control/requests`. Only the page's user can write there, and only the repo owner can read it. A systemd path unit then runs [`control/node-control.py`](control/node-control.py) **as the repo owner (not root)**. It accepts only the six actions above and rejects anything else.
+**How it stays safe.** The page runs in a container with no Docker socket, a read-only filesystem, no capabilities, and no access to the repo. Pressing a button only drops a small request file in `/var/lib/node-control/requests`. Only the page's user can write there, and only the repo owner can read it. A systemd path unit then runs [`control/node-control.py`](control/node-control.py) **as the repo owner (not root)**. It accepts only the eight actions above and rejects anything else.
 
 **Apply update** fast-forwards to what's already merged on `origin/main`, never anything else. It refuses if the checkout has local changes or isn't on `main`. It then restarts only what changed:
 

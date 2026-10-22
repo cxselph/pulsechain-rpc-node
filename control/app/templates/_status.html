@@ -119,14 +119,22 @@
 <section class="card">
   <h2>Actions</h2>
   <div class="actions">
+    {% set node_down = h.get('containers') and not (h.containers.get('pulse-geth', {'running': True}).get('running') and h.containers.get('pulse-beacon', {'running': True}).get('running')) %}
+    {% if s.stopped %}
+    {% set show = ['start-node', 'check-updates'] %}
+    {% elif node_down %}
+    {# Stopped some other way (./stop.sh over SSH, a crash): offer Start instead of Stop. #}
+    {% set show = ['start-node', 'check-updates', 'restart-node'] %}
+    {% else %}
     {% set show = ['check-updates'] %}
     {% if repo.get('behind') and repo.get('can_apply') %}{% set show = show + ['apply-update'] %}{% endif %}
     {% if repo.get('rollback_to') %}{% set show = show + ['rollback'] %}{% endif %}
-    {% set show = show + ['restart-node', 'restart-geth', 'restart-beacon'] %}
+    {% set show = show + ['restart-node', 'restart-geth', 'restart-beacon', 'stop-node'] %}
+    {% endif %}
     {% for name in show %}
     <form method="post" action="{{ url_for('action', name=name) }}">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button class="{{ 'primary' if name == 'apply-update' else '' }}" {{ 'disabled' if busy or not h }}>{{ ACTIONS[name][0] }}</button>
+      <button class="{{ 'primary' if name in ('apply-update', 'start-node') else 'danger' if name == 'stop-node' else '' }}" {{ 'disabled' if busy or not h }}>{{ ACTIONS[name][0] }}</button>
     </form>
     {% endfor %}
   </div>
