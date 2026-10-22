@@ -123,6 +123,25 @@ class NodeControlTest(unittest.TestCase):
         with open(os.path.join(self.state, "status.json")) as fh:
             self.assertEqual(json.load(fh)["repo"]["behind"], 1)
 
+    def test_check_updates_logs_details(self):
+        self.request("check-updates"); nc.process()
+        h = self.history()[-1]
+        self.assertEqual(h["summary"], "up to date")
+        with open(os.path.join(self.state, "logs", f"{h['id']}.log")) as fh:
+            self.assertIn("Up to date at", fh.read())
+        self.write("common.sh", COMMON.format(g="v3.4.0", b="v2.3.0")); self.commit("Bump go-pulse to v3.4.0")
+        self.write("control/app/control.py", "# new\n"); self.commit("Page tweak")
+        self.write("control/install.sh", "#!/bin/sh\n"); self.commit("New unit")
+        self.request("check-updates", rid="00000000000000c2"); nc.process()
+        h = self.history()[-1]
+        self.assertEqual(h["summary"], "3 update(s) available")
+        with open(os.path.join(self.state, "logs", f"{h['id']}.log")) as fh:
+            log = fh.read()
+        for want in ("3 new commit(s) on origin/main:", "Bump go-pulse to v3.4.0", "Page tweak",
+                     "go-pulse: v3.3.0 -> v3.4.0", "Apply update would restart: go-pulse + Prysm, this page",
+                     "Afterwards, over SSH: ./control/install.sh"):
+            self.assertIn(want, log)
+
     def test_apply_blocked_by_local_changes(self):
         self.write("common.sh", COMMON.format(g="v3.4.0", b="v2.3.0")); self.commit("bump")
         self.write("docker-compose.yml", "services: {edited: {}}\n", root=self.repo)

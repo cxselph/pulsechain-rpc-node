@@ -309,8 +309,32 @@ def act_check_updates(log):
         log.append(info.get("fetch_error", ""))
         return False, "could not reach GitHub to check for updates"
     if info["behind"]:
+        log.extend(update_details(info))
         return True, f"{info['behind']} update(s) available"
+    log.append(f"Up to date at {info.get('head', '')[:7]} ({info.get('head_date', '')}).")
     return True, "up to date"
+
+
+AREA_NAMES = {"node": "go-pulse + Prysm", "monitoring": "monitoring", "proxy": "HTTPS front end",
+              "control": "this page", "tailscale": "Tailscale DNS"}
+
+
+def update_details(info):
+    """What Apply update would bring in, for the check-updates log."""
+    lines = [f"{info['behind']} new commit(s) on {REMOTE}/{BRANCH}:"]
+    lines += [f"  {c['sha']}  {c['date']}  {c['subject']}" for c in info.get("incoming", [])]
+    if info["behind"] > len(info.get("incoming", [])):
+        lines.append(f"  … and {info['behind'] - len(info['incoming'])} older")
+    for k, v in info.get("incoming_pins", {}).items():
+        if v != info.get("pins", {}).get(k):
+            lines.append(f"{'go-pulse' if k == 'geth' else 'Prysm'}: {info.get('pins', {}).get(k)} -> {v}")
+    areas = info.get("incoming_areas", [])
+    lines.append("Apply update would restart: " + (", ".join(AREA_NAMES.get(a, a) for a in areas) if areas else "nothing"))
+    if info.get("incoming_manual"):
+        lines.append("Afterwards, over SSH: " + "  ".join(info["incoming_manual"]))
+    for r in info.get("blocked_reasons", []):
+        lines.append(f"Can't apply yet: {r}")
+    return lines
 
 
 def act_apply_update(log):
