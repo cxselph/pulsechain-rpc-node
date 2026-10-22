@@ -19,7 +19,7 @@
   </nav>
   {% endif %}
 </header>
-<main>
+<main{% block main_attrs %}{% endblock %}>
 {% block content %}{% endblock %}
 </main>
 </body>

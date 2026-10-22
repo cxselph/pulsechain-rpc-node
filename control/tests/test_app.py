@@ -228,6 +228,9 @@ class AppTest(unittest.TestCase):
         html = self.c.get("/console", base_url=BASE).get_data(as_text=True)
         self.assertIn('data-tabs="geth,beacon"', html); self.assertIn("go-pulse", html); self.assertIn("Prysm", html)
         self.assertNotIn("style=", html)
+        self.assertIn('<main class="wide">', html)          # console uses the whole window width
+        self.assertIn('id="console-wrap"', html); self.assertIn('id="console-full"', html)
+        self.assertNotIn('class="wide"', self.c.get("/", base_url=BASE).get_data(as_text=True))  # dashboard stays narrow
 
     def test_console_incremental_lines(self):
         self.login()
