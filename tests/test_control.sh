@@ -72,6 +72,12 @@ fi
 grep -q 'node-control-logs.service' "${CTL}/install.sh" && grep -q '^User=@USER@$' "${CTL}/systemd/node-control-logs.service" \
   && grep -q '^Restart=always$' "${CTL}/systemd/node-control-logs.service" \
   && pass "console log helper: installed by install.sh, runs as the repo owner, restarts on failure" || fail "node-control-logs.service setup"
+# Grafana links open in their own (reused) tab, so the control page stays put.
+if ! grep -rhoE '<a [^>]*href="/grafana[^>]*>' "${CTL}/app/templates" "${ROOT}/proxy/site" | grep -v 'target="grafana" rel="noopener"' | grep -q .; then
+  pass "Grafana links open in the grafana tab"
+else
+  fail "a Grafana link is missing target=\"grafana\" rel=\"noopener\""
+fi
 grep -q 'textContent = l' "${CTL}/app/static/app.js" && ! grep -q 'innerHTML = l' "${CTL}/app/static/app.js" \
   && pass "console renders log lines as text, never HTML" || fail "console must render log lines with textContent"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then

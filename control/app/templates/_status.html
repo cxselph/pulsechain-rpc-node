@@ -112,7 +112,7 @@
     <dt>Inbound peers</dt><dd class="{{ 'bad' if r.inbound_avg is not none and r.inbound_avg < 1 }}">{{ '%.1f' % r.inbound_avg if r.inbound_avg is not none else '—' }} on average</dd>
     <dt>History</dt><dd>{{ '%.1f' % (r.history_days or 0) }} of 30 days recorded</dd>
   </dl>
-  <p class="hint">Ready = synced, go-pulse ≥ 25 and Prysm ≥ 30 peers, clock within 0.5 s. <a href="/grafana/d/pulse-validator-readiness">Details in Grafana</a></p>
+  <p class="hint">Ready = synced, go-pulse ≥ 25 and Prysm ≥ 30 peers, clock within 0.5 s. <a href="/grafana/d/pulse-validator-readiness" target="grafana" rel="noopener">Details in Grafana</a></p>
   {% endif %}
 </section>
 
