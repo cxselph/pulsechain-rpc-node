@@ -327,6 +327,8 @@ Changes that need `sudo` (the monitoring helper, the control systemd units) are 
 
 If the control page isn't running, `https://<host>/` falls back to the static landing page. The wallet RPC on the same address is unaffected either way.
 
+**On a phone's home screen.** The page has its own icon and opens full-screen like an app. The phone must trust your certificate first, or iOS uses a screenshot instead of the icon. Then open `https://<host>/` in Safari, tap Share → **Add to Home Screen**, and sign in once inside the app: it keeps its own cookies, separate from Safari's. If you added it before the icon existed, delete it and add it again, because iOS doesn't refresh home-screen icons. The icon's source is `control/app/static/touch-icon.svg`; the PNGs next to it are rendered from it.
+
 ---
 
 ## Optional: away from home over Tailscale (same `https://<host>`)

@@ -71,6 +71,21 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.c.get("/api/status", base_url=BASE).status_code, 401)
         self.assertEqual(self.c.get("/fragment/status", base_url=BASE).status_code, 401)
 
+    def test_home_screen_files_are_public(self):
+        for path, ctype in (("/apple-touch-icon.png", "image/png"), ("/icon-512.png", "image/png"),
+                            ("/manifest.webmanifest", "application/manifest+json"),
+                            ("/static/favicon.svg", "image/svg+xml"), ("/static/favicon-32.png", "image/png")):
+            r = self.c.get(path, base_url=BASE)  # signed out
+            self.assertEqual(r.status_code, 200, path); self.assertEqual(r.mimetype, ctype, path)
+        m = json.loads(self.c.get("/manifest.webmanifest", base_url=BASE).get_data(as_text=True))
+        self.assertEqual(m["display"], "standalone"); self.assertLessEqual(len(m["short_name"]), 12)
+        # Only those exact files: pages and data still need sign-in.
+        self.assertEqual(self.c.get("/", base_url=BASE).status_code, 302)
+        self.assertEqual(self.c.get("/api/status", base_url=BASE).status_code, 401)
+        self.assertEqual(self.c.get("/app.css", base_url=BASE).status_code, 404)  # nothing else at the root
+        login = self.c.get("/login", base_url=BASE).get_data(as_text=True)  # iOS may add it from the sign-in page
+        self.assertIn('rel="apple-touch-icon"', login); self.assertIn('rel="manifest"', login)
+
     def test_login_post_needs_csrf(self):
         r = self.c.post("/login", base_url=BASE, data={"password": PASSWORD})
         self.assertEqual(r.status_code, 400)
