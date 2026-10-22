@@ -17,9 +17,16 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone
 
-from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
+
+# Served at the site root and before sign-in: Safari fetches these without the session.
+HOME_SCREEN_FILES = {
+    "apple-touch-icon.png": "image/png",
+    "icon-512.png": "image/png",
+    "manifest.webmanifest": "application/manifest+json",
+}
 
 STATE_DIR = os.environ.get("CONTROL_STATE_DIR", "/state")
 REQ_DIR = os.environ.get("CONTROL_REQUESTS_DIR", "/requests")
@@ -120,7 +127,7 @@ def create_app(config=None):
     @app.before_request
     def guards():
         # Untrusted Host or unknown path: let Flask answer with its 400/404.
-        if request.routing_exception is not None or request.endpoint in ("healthz", "static"):
+        if request.routing_exception is not None or request.endpoint in ("healthz", "static", "home_screen_file"):
             return None
         if request.method == "POST":
             token = session.get("csrf")
@@ -143,7 +150,7 @@ def create_app(config=None):
         resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["Referrer-Policy"] = "no-referrer"
-        if request.endpoint not in ("static",):
+        if request.endpoint not in ("static", "home_screen_file"):
             resp.headers["Cache-Control"] = "no-store"
         return resp
 
@@ -157,6 +164,10 @@ def create_app(config=None):
     @app.get("/healthz")
     def healthz():
         return {"ok": True}
+
+    @app.get("/<any(" + ", ".join(f'"{n}"' for n in HOME_SCREEN_FILES) + "):name>")
+    def home_screen_file(name):
+        return send_from_directory(app.static_folder, name, mimetype=HOME_SCREEN_FILES[name], max_age=86400)
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
