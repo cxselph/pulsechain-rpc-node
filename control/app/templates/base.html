@@ -14,7 +14,7 @@
   {% if session.get('auth') %}
   <nav>
     <a href="{{ url_for('console') }}">Console</a>
-    <a href="/grafana/">Grafana</a>
+    <a href="/grafana/" target="grafana" rel="noopener">Grafana</a>
     <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Sign out</button></form>
   </nav>
   {% endif %}
