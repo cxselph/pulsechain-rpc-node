@@ -52,13 +52,13 @@ ok "Directories ready"
 
 # --- 3. node-control helper (systemd, runs as ${OWNER}) ------------------------
 info "Installing the node-control helper units (run as ${OWNER})..."
-for unit in node-control.path node-control.service node-control-refresh.service node-control-refresh.timer node-control-logs.service; do
+for unit in node-control.path node-control.service node-control-refresh.service node-control-refresh.timer node-control-watchdog.service node-control-watchdog.timer node-control-logs.service; do
   sed -e "s|@USER@|${OWNER}|g" -e "s|@GROUP@|${OWNER_GROUP}|g" -e "s|@REPO@|${REPO_DIR}|g" \
     "${CONTROL_DIR}/systemd/${unit}" | $SUDO tee "/etc/systemd/system/${unit}" >/dev/null
   $SUDO chmod 0644 "/etc/systemd/system/${unit}"
 done
 $SUDO systemctl daemon-reload
-$SUDO systemctl enable --now node-control.path node-control-refresh.timer node-control-logs.service >/dev/null
+$SUDO systemctl enable --now node-control.path node-control-refresh.timer node-control-watchdog.timer node-control-logs.service >/dev/null
 $SUDO systemctl restart node-control-logs.service  # pick up unit changes on a re-run
 info "Collecting status (git fetch, containers, Debian updates)..."
 $SUDO systemctl start node-control-refresh.service || warn "First status refresh failed: journalctl -u node-control-refresh"
