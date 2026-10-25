@@ -12,6 +12,7 @@ tests:
       - {series: 'pulse_cl_up{job="node"}', values: '1x20'}
       - {series: 'pulse_el_syncing{job="node"}', values: '0x20'}
       - {series: 'pulse_cl_sync_distance{job="node"}', values: '1x20'}
+      - {series: 'pulse_el_head_age_seconds{job="node"}', values: '8x20'}
       - {series: 'pulse_el_peers{job="node"}', values: '40x20'}
       - {series: 'pulse_cl_peers{job="node"}', values: '45x20'}
       - {series: 'node_timex_sync_status{job="node"}', values: '1x20'}
@@ -40,6 +41,50 @@ tests:
       - {expr: 'pulse:ready', eval_time: 10m, exp_samples: [{labels: 'pulse:ready', value: 0}]}
       - {expr: 'pulse:both_up', eval_time: 10m, exp_samples: [{labels: 'pulse:both_up', value: 1}]}
 
+  # Head stuck while eth_syncing says false (2026-10-24: Prysm at 0 peers, go-pulse
+  # not syncing, newest block hours old): not synced.
+  - interval: 1m
+    input_series:
+      - {series: 'pulse_el_up{job="node"}', values: '1x20'}
+      - {series: 'pulse_cl_up{job="node"}', values: '1x20'}
+      - {series: 'pulse_el_syncing{job="node"}', values: '0x20'}
+      - {series: 'pulse_cl_sync_distance{job="node"}', values: '0x20'}
+      - {series: 'pulse_el_head_age_seconds{job="node"}', values: '14000+60x20'}
+    promql_expr_test:
+      - {expr: 'pulse:synced', eval_time: 10m, exp_samples: [{labels: 'pulse:synced', value: 0}]}
+
+  # Head-age alert (Grafana rule pulse-head-stalled; test_monitoring.sh checks the
+  # expression below matches rules.yml). Synced for 30 min, then no new blocks:
+  # the newest block ages 60 s a minute. Fires once it's over 2 min old.
+  - interval: 1m
+    input_series:
+      - {series: 'pulse_el_up{job="node"}', values: '1x60'}
+      - {series: 'pulse_cl_up{job="node"}', values: '1x60'}
+      - {series: 'pulse_el_syncing{job="node"}', values: '0x60'}
+      - {series: 'pulse_cl_sync_distance{job="node"}', values: '0x60'}
+      - {series: 'pulse_el_head_age_seconds{job="node"}', values: '5x29 65+60x30'}
+    promql_expr_test:
+      - expr: 'count(max(pulse_el_head_age_seconds) > 120 and on() max_over_time(pulse:synced[2d]) == 1)'
+        eval_time: 29m
+        exp_samples: []
+      - expr: 'count(max(pulse_el_head_age_seconds) > 120 and on() max_over_time(pulse:synced[2d]) == 1)'
+        eval_time: 32m
+        exp_samples: [{labels: '{}', value: 1}]
+
+  # Same alert during an initial sync (never synced yet): stays quiet even though
+  # the newest block is days old.
+  - interval: 1m
+    input_series:
+      - {series: 'pulse_el_up{job="node"}', values: '1x60'}
+      - {series: 'pulse_cl_up{job="node"}', values: '1x60'}
+      - {series: 'pulse_el_syncing{job="node"}', values: '1x60'}
+      - {series: 'pulse_cl_sync_distance{job="node"}', values: '0x60'}
+      - {series: 'pulse_el_head_age_seconds{job="node"}', values: '900000-100x60'}
+    promql_expr_test:
+      - expr: 'count(max(pulse_el_head_age_seconds) > 120 and on() max_over_time(pulse:synced[2d]) == 1)'
+        eval_time: 50m
+        exp_samples: []
+
   # Clock offset over 0.5 s counts as not ok even when "synchronized".
   - interval: 1m
     input_series:
@@ -63,6 +108,7 @@ tests:
       - {series: 'pulse_cl_up{job="node"}', values: '1x130'}
       - {series: 'pulse_el_syncing{job="node"}', values: '0x130'}
       - {series: 'pulse_cl_sync_distance{job="node"}', values: '0x130'}
+      - {series: 'pulse_el_head_age_seconds{job="node"}', values: '5x130'}
       - {series: 'pulse_el_peers{job="node"}', values: '40x130'}
       - {series: 'pulse_cl_peers{job="node"}', values: '45x130'}
       - {series: 'node_timex_sync_status{job="node"}', values: '1x130'}

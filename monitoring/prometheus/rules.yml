@@ -1,7 +1,8 @@
 # Validator readiness signals, evaluated every minute. Each is a single
 # unlabeled 0/1 series (missing data counts as 0), so dashboards can average,
 # count and streak them. The bar (tune here if needed):
-#   synced  both clients answering, go-pulse not syncing, beacon <= 2 slots behind
+#   synced  both clients answering, go-pulse not syncing, beacon <= 2 slots behind,
+#           newest go-pulse block under a minute old
 #   peers   go-pulse >= 25 and Prysm >= 30
 #   clock   kernel clock synchronized and within 0.5 s
 #   ready   all three at once
@@ -14,7 +15,8 @@ groups:
       - record: pulse:synced
         expr: >-
           (max(pulse_el_up == bool 1) * max(pulse_cl_up == bool 1)
-           * max(pulse_el_syncing == bool 0) * max(pulse_cl_sync_distance <= bool 2)) or vector(0)
+           * max(pulse_el_syncing == bool 0) * max(pulse_cl_sync_distance <= bool 2)
+           * max(pulse_el_head_age_seconds <= bool 60)) or vector(0)
       - record: pulse:peers_ok
         expr: (max(pulse_el_peers >= bool 25) * max(pulse_cl_peers >= bool 30)) or vector(0)
       - record: pulse:clock_ok
