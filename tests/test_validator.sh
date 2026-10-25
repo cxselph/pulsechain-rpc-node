@@ -132,7 +132,7 @@ date -u +%Y-%m-%dT%H:%M:%SZ > "${VAL_ENABLED}"
 [[ -z "$(problems)" ]] && pass "switched on + complete setup: no problems" || { fail "expected no problems, got:"; problems >&2; }
 
 # --- Scripts -----------------------------------------------------------------------
-for s in start restart enable disable import-keys export-slashing import-slashing; do
+for s in start restart enable disable import-keys export-slashing import-slashing exit; do
   if out="$(bash "${VAL}/${s}.sh" 2>&1)"; then
     [[ "${EUID}" -eq 0 ]] && pass "${s}.sh (running as root, skipped)" || fail "${s}.sh should refuse without root"
   else
@@ -149,6 +149,16 @@ grep -q 'rm -f "${VAL_RESUME_FILE}"' "${VAL}/stop.sh" && pass "validator/stop.sh
 grep -q '"pulse-validator")' "${ROOT}/control/node-control.py" && pass "watchdog never restarts the validator" \
   || fail "pulse-validator should be in the watchdog's NODE_CLIENTS"
 grep -qx '\.env' "${ROOT}/.gitignore" && pass "validator/.env is gitignored" || fail ".env should be gitignored"
+
+# Every script is documented, and the runbook covers the procedures that can go wrong.
+for f in "${VAL}"/*.sh; do
+  s="$(basename "${f}")"; [[ "${s}" == lib.sh ]] && continue
+  grep -qF "validator/${s}" "${ROOT}/README.md" "${VAL}/RUNBOOK.md" && pass "documented: ${s}" || fail "validator/${s} is not mentioned in README.md or RUNBOOK.md"
+done
+for h in "First switch-on" "Moving the validator" "Restoring the VM" "Voluntary exit" "double-signing"; do
+  grep -q "^## .*${h}" "${VAL}/RUNBOOK.md" && pass "runbook section: ${h}" || fail "RUNBOOK.md lacks a section on ${h}"
+done
+grep -qF 'validator/RUNBOOK.md' "${ROOT}/README.md" && pass "README links the runbook" || fail "README should link validator/RUNBOOK.md"
 
 # --- Node stop/start and the validator, against a fake docker ---------------------
 fake="${TMP}/fakebin"; dstate="${TMP}/docker"; mkdir -p "${fake}" "${dstate}"
