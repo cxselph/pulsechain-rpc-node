@@ -164,6 +164,10 @@ def classify(paths):
             manual.append("./tailscale/install.sh")
         elif p.startswith("tailscale/"):
             areas["tailscale"] = True
+        elif p.startswith("validator/") and not p.endswith(".md"):
+            # Never restarted automatically: a restart costs a doppelganger wait,
+            # and its checks need root. Only matters once it's switched on.
+            manual.append("sudo ./validator/restart.sh (only if the validator is switched on)")
         elif p.startswith("control/systemd/") or p == "control/install.sh":
             manual.append("./control/install.sh")
         elif p.startswith("control/") and p not in ("control/node-control.py", "control/node-logs.py"):
@@ -537,8 +541,9 @@ def process():
 RPC_URL = os.environ.get("PULSE_RPC_URL", "http://127.0.0.1:8545")
 BEACON_URL = os.environ.get("PULSE_BEACON_URL", "http://127.0.0.1:3500")
 HOST_RESOLV = os.environ.get("NODE_CONTROL_RESOLV", "/etc/resolv.conf")
-# Never restarted for DNS: neither needs it once running, and restarts cost sync.
-NODE_CLIENTS = ("pulse-geth", "pulse-beacon")
+# Never restarted for DNS: none needs it once running, and restarts cost sync
+# (the validator's costs a 2-3 epoch doppelganger wait).
+NODE_CLIENTS = ("pulse-geth", "pulse-beacon", "pulse-validator")
 DNS_RESTART_EVERY = 3600   # at most one DNS restart per container per hour
 PRYSM_ZERO_FOR = 600       # Prysm at 0 peers this long (and up this long) ...
 PRYSM_RESTART_EVERY = 3600  # ... gets a restart, at most this often
