@@ -231,7 +231,9 @@ nano monitoring/.env             # SMTP server/user/password, sender, ALERT_EMAI
 - **clock:** synchronized and within 0.5 s
 - **ready:** all three at once
 
-The **Validator readiness** dashboard shows ready-now, the streak toward 30 days in a row, 30-day uptime / downtime / outages, peers and inbound peers, clock offset, memory / swap / I/O headroom and chain-disk days left, the last reboot's resync time, plus the checks that have to be done by hand (drive wear, reboot drills, UPS, key plan). Prometheus keeps 45 days, so the 30-day window is always complete.
+The 30-day bar: **30 clean days** (no outage over an hour, meaning an hour with no ready minute or, with the host or Prometheus off, no data) with **ready ≥ 99.5%** of the last 30 days, plus the checks by hand (including that no outage needed a fix by hand). A planned reboot or UPS test doesn't start the 30 days over. Clean days start counting when the rules are first installed.
+
+The **Validator readiness** dashboard shows ready-now, **clean days** toward 30 (days since the last outage over an hour; short planned reboots don't reset them), ready % over 30 days (goal ≥ 99.5%), 30-day uptime / downtime / outages, peers and inbound peers, clock offset, memory / swap / I/O headroom and chain-disk days left, the last reboot's resync time, plus the checks that have to be done by hand (drive wear, reboot drills, UPS, key plan). Prometheus keeps 45 days, so the 30-day window is always complete.
 
 **Alerts** (email, repeated every 12 h while active): go-pulse or Prysm not answering, a scrape target down, the status helper stopped, initial sync stalled for 1 h, the newest block over 2 minutes old for 3 minutes (once the node has been synced in the last 2 days; it doesn't rely on `eth_syncing`), beacon more than 50 slots behind, fewer than 5 peers, beacon reports go-pulse offline after sync, a disk over 85%, chain disk full within 30 days at the current rate, and a client restarting repeatedly, the clock out of sync for 15 min, and no inbound peers for 6 h after the initial sync (port forwards broken).
 
@@ -293,7 +295,7 @@ A phone-friendly page, served through the HTTPS front end, that shows node healt
 
 - **Status:** a green / yellow / red banner; sync progress (with an ETA if monitoring is installed); peers; beacon; disk; Debian updates; go-pulse / Prysm versions; the fork commit; and whether `main` has updates (with the commit list and any image-pin changes). It refreshes on its own.
 - **Wallet settings:** network name, RPC URL (`https://<host>`), chain ID 369, symbol, explorer and WebSocket, each with a Copy button. In a browser with MetaMask (desktop extension or MetaMask's in-app browser), **Add to MetaMask** fills them in.
-- **Validator readiness** (if monitoring is installed): ready now and which part fails, the streak toward 30 days, 30-day uptime, downtime, outages and inbound peers.
+- **Validator readiness** (if monitoring is installed): ready now and which part fails, clean days toward 30, ready % (goal 99.5%), 30-day uptime, downtime, outages and inbound peers.
 - **Console** (`/console`): the last 500 lines of go-pulse and Prysm logs, updating every 3 s, with the sync numbers on top, a "sync lines only" filter, pause, and warnings/errors coloured. It's read-only. A separate `node-control-logs` service follows `docker logs` as the repo owner and keeps those lines in `/var/lib/node-control/state/live/`, so the page still has no Docker access.
 - **Actions** (each behind a confirm screen, one at a time, all logged with output):
   - Check for updates

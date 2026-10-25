@@ -25,7 +25,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Readiness (target: 30 days in a row)",
+      "title": "Readiness (target: 30 clean days, ready ≥ 99.5% of them)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -39,7 +39,7 @@
       "id": 2,
       "type": "stat",
       "title": "Ready now",
-      "description": "Synced (both clients up, go-pulse not syncing, beacon \u2264 2 slots behind) AND peers (go-pulse \u2265 25, Prysm \u2265 30) AND clock synchronized within 0.5 s.",
+      "description": "Synced (both clients up, go-pulse not syncing, beacon ≤ 2 slots behind) AND peers (go-pulse ≥ 25, Prysm ≥ 30) AND clock synchronized within 0.5 s.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -114,8 +114,8 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Ready streak",
-      "description": "Days since the node last missed the bar. The goal is 30.",
+      "title": "Clean days",
+      "description": "Days since the last outage longer than an hour (an hour with no ready minute, or no data at all). Short planned reboots don't reset it. The goal is 30, with Ready ≥ 99.5% over the same 30 days.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -132,7 +132,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(time() - max_over_time(pulse:not_ready_at[45d])) / 86400 or count_over_time(pulse:ready[45d]) / 1440",
+          "expr": "(time() - max_over_time(pulse:long_outage_at[45d])) / 86400 or count_over_time(pulse:clean_watch[45d]) / 1440",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -249,7 +249,7 @@
       "id": 5,
       "type": "stat",
       "title": "Uptime, last 30 days",
-      "description": "Both clients answering. Target \u2265 99.5% (under ~3.5 h down).",
+      "description": "Both clients answering. Target ≥ 99.5% (under ~3.5 h down).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1554,7 +1554,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Not visible from the VM. Check these before turning on a validator:\n\n- **Drive wear** (monthly, on the Proxmox host): `smartctl -a /dev/nvme0n1` (and nvme1, nvme2). *Percentage Used* creeping slowly, *Media and Data Integrity Errors* 0.\n- **Recovery drills**: one VM reboot and one host reboot, each back to *Ready* within ~15 minutes.\n- **A client update** applied with *Apply update* on the control page.\n- **UPS** on the Proxmox box, and a written key-handling plan (mnemonic offline; never start a validator from a snapshot or backup)."
+        "content": "Not visible from the VM. Check these before turning on a validator:\n\n- **Drive wear** (monthly, on the Proxmox host): `smartctl -a /dev/nvme0n1` (and nvme1, nvme2). *Percentage Used* creeping slowly, *Media and Data Integrity Errors* 0.\n- **No manual fixes**: every outage in the 30 days recovered by itself (or by the watchdog), with no restart by hand. A hand fix means the node isn't proven yet: start the 30 days again.\n- **Recovery drills**: one VM reboot and one host reboot, each back to *Ready* within ~15 minutes.\n- **A client update** applied with *Apply update* on the control page.\n- **UPS** on the Proxmox box, and a written key-handling plan (mnemonic offline; never start a validator from a snapshot or backup)."
       }
     }
   ]

@@ -50,8 +50,8 @@ ACTIONS = {
     "rollback": ("Roll back", "Returns to the version before the last update and restarts what it touches."),
     "stop-node": ("Stop the node",
                   "Stops go-pulse and Prysm and leaves them stopped, even across a reboot, until you press "
-                  "Start node. Wallets using this RPC stop working, the downtime counts against uptime and "
-                  "the readiness streak, and Grafana will email a node-down alert."),
+                  "Start node. Wallets using this RPC stop working, the downtime counts against uptime (over an "
+                  "hour restarts the readiness clock), and Grafana will email a node-down alert."),
     "start-node": ("Start the node", "Starts go-pulse and Prysm. They catch up with the chain within a few minutes."),
 }
 
@@ -70,7 +70,9 @@ READINESS_QUERIES = {
     "synced": "pulse:synced",
     "peers_ok": "pulse:peers_ok",
     "clock_ok": "pulse:clock_ok",
-    "streak_days": "(time() - max_over_time(pulse:not_ready_at[45d])) / 86400 or count_over_time(pulse:ready[45d]) / 1440",
+    # Same expression as the dashboard's "Clean days" tile (tests/test_monitoring.sh checks).
+    "clean_days": "(time() - max_over_time(pulse:long_outage_at[45d])) / 86400 or count_over_time(pulse:clean_watch[45d]) / 1440",
+    "ready_pct": "avg_over_time(pulse:ready[30d]) * 100",
     "uptime_pct": "avg_over_time(pulse:both_up[30d]) * 100",
     "downtime_min": "round((1 - avg_over_time(pulse:both_up[30d])) * count_over_time(pulse:both_up[30d]))",
     "outages": "ceil(changes(pulse:both_up[30d]) / 2)",
