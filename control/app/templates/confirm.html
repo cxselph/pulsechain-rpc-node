@@ -20,7 +20,7 @@
     <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
     {% endif %}
     <div class="row">
-      <button class="{{ 'stop' if name == 'stop-node' else 'primary' }}" type="submit">Yes, {{ ACTIONS[name][0] | lower }}</button>
+      <button class="{{ 'stop' if name in ('stop-node', 'stop-validator') else 'primary' }}" type="submit">Yes, {{ ACTIONS[name][0] | lower }}</button>
       <a class="button" href="{{ url_for('index') }}">Cancel</a>
     </div>
   </form>

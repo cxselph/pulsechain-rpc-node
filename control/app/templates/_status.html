@@ -117,6 +117,43 @@
   {% endif %}
 </section>
 
+{% set v = s.get('validator') %}
+{% if v %}
+{% set vm = v.metrics or {} %}
+<section class="card" id="validator">
+  <h2>Validator</h2>
+  {% if v.state == 'off' %}
+  <p class="big">Switched off</p>
+  <p class="hint">Nothing runs and no validator alerts fire until it's switched on, over SSH, after the readiness bar and the key ceremony: <code>sudo ./validator/enable.sh</code></p>
+  {% else %}
+  <p class="big">{% if v.state == 'stopped' %}<span class="bad">Stopped</span>
+    {% elif v.state == 'doppelganger' %}Doppelganger wait
+    {% elif v.status_text == 'Active' %}<span class="good">Attesting</span>
+    {% elif v.status_text %}{{ v.status_text }}{% else %}Running{% endif %}</p>
+  <dl>
+    <dt>Client</dt><dd>{% if v.running %}running since {{ v.started_at | ago | replace(' ago', '') }}{% else %}<span class="bad">stopped</span>{% endif %}</dd>
+    <dt>Status</dt><dd class="{{ 'bad' if vm.status is not none and 4 <= vm.status <= 7 }}">{{ v.status_text or '—' }}</dd>
+    <dt>Balance</dt><dd>{{ vm.balance | num if vm.balance is not none else '—' }} PLS</dd>
+    <dt>Last attestation</dt><dd class="{{ 'bad' if vm.lag_slots is not none and vm.lag_slots > 128 }}">{{ '%d slots ago' % vm.lag_slots if vm.lag_slots is not none else '—' }}</dd>
+    <dt>Target votes (24 h)</dt><dd>{{ '%.1f%%' % (vm.target_24h * 100) if vm.target_24h is not none else '—' }}{% if vm.attested_24h %} · {{ vm.attested_24h | num }} attestations{% endif %}</dd>
+    {% if vm.refusals %}<dt>Slashing protection</dt><dd class="bad">refused {{ vm.refusals | num }} signature(s): another copy of the keys may be running</dd>{% endif %}
+    <dt>Fee recipient</dt><dd><code>{{ v.fee_recipient or 'not set' }}</code></dd>
+  </dl>
+  {% if v.state == 'doppelganger' %}<p class="hint">After every start it waits 2-3 epochs (about 10-16 minutes) to make sure these keys aren't signing anywhere else. Missing those attestations is expected.</p>{% endif %}
+  {% if not v.has_metrics %}<p class="hint">Numbers come from the monitoring stack once it scrapes the validator.</p>{% endif %}
+  <div class="actions">
+    {% set vname = 'stop-validator' if v.running else 'start-validator' %}
+    <form method="post" action="{{ url_for('action', name=vname) }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="{{ 'danger' if v.running else 'primary' }}" {{ 'disabled' if busy or not h or s.stopped }}>{{ ACTIONS[vname][0] }}</button>
+    </form>
+  </div>
+  {% if s.stopped %}<p class="hint">Start the node first.</p>{% endif %}
+  <p class="hint"><a href="/grafana/d/pulse-validator" target="grafana" rel="noopener">Details in Grafana</a></p>
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="card">
   <h2>Actions</h2>
   <div class="actions">

@@ -10,3 +10,6 @@
 
 # Python
 __pycache__/
+
+# Validator: resume marker written by stop.sh
+validator/.resume-with-node

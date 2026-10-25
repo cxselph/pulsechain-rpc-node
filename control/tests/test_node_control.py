@@ -196,6 +196,42 @@ class NodeControlTest(unittest.TestCase):
         self.assertTrue(h["ok"], h); self.assertIn("start.sh ran", self.calls_log())
         self.assertFalse(os.path.exists(os.path.join(self.state, "stopped.json")))
 
+    def test_stop_then_start_validator(self):
+        for name in ("validator/stop.sh", "validator/resume.sh"):
+            self.write(name, f'#!/bin/sh\necho "{name} ran" >> "{self.calls}"\n', mode=0o755, root=self.repo)
+        self.request("stop-validator"); nc.process()
+        h = self.history()[-1]
+        self.assertTrue(h["ok"], h); self.assertIn("stays down until Start validator", h["summary"])
+        self.assertIn("validator/stop.sh ran", self.calls_log())
+        self.request("start-validator", rid="00000000000000d3"); nc.process()
+        h = self.history()[-1]
+        self.assertTrue(h["ok"], h); self.assertIn("doppelganger", h["summary"])
+        self.assertIn("validator/resume.sh ran", self.calls_log())
+        # The node's own stop marker is untouched by either.
+        self.assertFalse(os.path.exists(os.path.join(self.state, "stopped.json")))
+
+    def test_validator_status(self):
+        data = os.path.join(self.tmp, "chain")
+        self.write(".env", f"DATA_DIR={data}\n", root=self.repo)
+        self.write("validator/.env", 'FEE_RECIPIENT="0x000000000000000000000000000000000000dEaD"\n', root=self.repo)
+        v = nc.validator_status()
+        self.assertEqual((v["enabled"], v["since"]), (False, None))
+        self.assertEqual(v["fee_recipient"], "0x000000000000000000000000000000000000dEaD")
+        self.write("validator/ENABLED", "2026-10-25T20:00:00Z\n", root=data)
+        v = nc.validator_status()
+        self.assertEqual((v["enabled"], v["since"]), (True, "2026-10-25T20:00:00Z"))
+        self.assertIn("validator", nc.refresh(fetch=False))
+
+    def test_container_status_survives_a_missing_container(self):
+        # docker inspect prints the containers it found, then an error for the rest.
+        bindir = os.path.dirname(shutil.which("docker"))
+        with open(os.path.join(bindir, "docker"), "w") as fh:
+            fh.write('#!/bin/sh\necho \'[{"Name": "/pulse-geth", "State": {"Status": "running", "Running": true}}]\'\n'
+                     'echo "Error: No such object: pulse-validator" >&2\nexit 1\n')
+        c = nc.container_status()
+        self.assertTrue(c["pulse-geth"]["running"])
+        self.assertEqual(c["pulse-validator"]["status"], "not installed")
+
     def test_restart_actions_call_compose(self):
         self.request("restart-geth"); nc.process()
         self.assertIn("docker compose restart geth", self.calls_log())

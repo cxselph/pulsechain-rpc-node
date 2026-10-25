@@ -32,8 +32,22 @@ def fake_status(**over):
     }
     for k, v in over.items():
         s[k] = v
+    if "validator" not in over:
+        s["validator"] = control.validator_state(s)
     s["health"] = control.health(s)
     return s
+
+
+def with_validator(enabled=True, running=True, started_at="2026-10-17T10:00:00.123456789Z", **metrics):
+    """fake_status with the helper reporting a validator (and Prometheus answering with metrics)."""
+    control.validator_metrics = lambda: dict(metrics)
+    helper = fake_status()["helper"]
+    helper["validator"] = {"enabled": enabled, "since": "2026-10-17T09:00:00Z" if enabled else None,
+                           "fee_recipient": "0x000000000000000000000000000000000000dEaD"}
+    helper["containers"]["pulse-validator"] = ({"running": running, "status": "running" if running else "exited",
+                                                "started_at": started_at} if enabled else
+                                               {"running": False, "status": "not installed"})
+    return fake_status(helper=helper)
 
 
 class AppTest(unittest.TestCase):
@@ -44,6 +58,7 @@ class AppTest(unittest.TestCase):
         control.STATE_DIR, control.REQ_DIR = self.state, self.req
         self.status = fake_status()
         self._orig = control.collect_status
+        self._orig_vm = control.validator_metrics
         control.collect_status = lambda: self.status
         self.app = control.create_app({
             "TESTING": True, "SECRET_KEY": "test-secret",
@@ -53,6 +68,7 @@ class AppTest(unittest.TestCase):
 
     def tearDown(self):
         control.collect_status = self._orig
+        control.validator_metrics = self._orig_vm
 
     def csrf(self, path="/login"):
         html = self.c.get(path, base_url=BASE).get_data(as_text=True)
@@ -199,6 +215,81 @@ class AppTest(unittest.TestCase):
         self.status = st
         html = self.c.get("/", base_url=BASE).get_data(as_text=True)
         self.assertIn("Start the node", html); self.assertNotIn("Stop the node", html)
+
+    # --- validator card ----------------------------------------------------------
+    def test_no_validator_card_without_helper_report(self):
+        self.login()
+        self.assertNotIn('id="validator"', self.c.get("/", base_url=BASE).get_data(as_text=True))
+
+    def test_validator_switched_off(self):
+        self.login()
+        self.status = with_validator(enabled=False)
+        self.assertEqual(self.status["validator"]["state"], "off")
+        html = self.c.get("/", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Switched off", html); self.assertIn("sudo ./validator/enable.sh", html)
+        self.assertNotIn("Stop the validator", html); self.assertNotIn("Start the validator", html)
+        self.assertNotIn("validator", self.status["health"][1])
+        tok = self.csrf("/")
+        r = self.c.post("/action/start-validator", base_url=BASE, data={"csrf": tok, "confirmed": "yes"})
+        self.assertEqual(r.status_code, 302); self.assertEqual(self.requests(), [])
+        self.assertIn("isn&#39;t switched on", self.c.get("/", base_url=BASE).get_data(as_text=True))
+
+    def test_validator_attesting_and_stop_needs_password(self):
+        self.login()
+        self.status = with_validator(status=3.0, balance=32000123.4, lag_slots=12.0, refusals=0.0,
+                                     target_24h=0.991, attested_24h=270.0)
+        v = self.status["validator"]
+        self.assertEqual((v["state"], v["status_text"]), ("running", "Active"))
+        html = self.c.get("/", base_url=BASE).get_data(as_text=True)
+        for text in ("Attesting", "32,000,123 PLS", "12 slots ago", "99.1%", "270 attestations",
+                     "0x000000000000000000000000000000000000dEaD", "Stop the validator"):
+            self.assertIn(text, html)
+        self.assertNotIn("Start the validator", html)
+        tok = self.csrf("/")
+        html = self.c.post("/action/stop-validator", base_url=BASE, data={"csrf": tok}).get_data(as_text=True)
+        self.assertIn('name="password"', html); self.assertIn("not an exit", html)
+        r = self.c.post("/action/stop-validator", base_url=BASE, data={"csrf": tok, "confirmed": "yes", "password": "no"})
+        self.assertEqual(r.status_code, 401); self.assertEqual(self.requests(), [])
+        r = self.c.post("/action/stop-validator", base_url=BASE, data={"csrf": tok, "confirmed": "yes", "password": PASSWORD})
+        self.assertEqual(r.status_code, 302); self.assertEqual(len(self.requests()), 1)
+        with open(os.path.join(self.req, self.requests()[0])) as fh:
+            self.assertEqual(json.load(fh)["action"], "stop-validator")
+
+    def test_validator_stopped_is_a_problem_and_start_needs_no_password(self):
+        self.login()
+        self.status = with_validator(running=False)
+        self.assertEqual(self.status["validator"]["state"], "stopped")
+        self.assertEqual(self.status["health"][0], "red")
+        self.assertIn("validator switched on but not running", self.status["health"][1])
+        html = self.c.get("/", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Start the validator", html); self.assertNotIn("Stop the validator", html)
+        tok = self.csrf("/")
+        html = self.c.post("/action/start-validator", base_url=BASE, data={"csrf": tok}).get_data(as_text=True)
+        self.assertNotIn('name="password"', html)
+        r = self.c.post("/action/start-validator", base_url=BASE, data={"csrf": tok, "confirmed": "yes"})
+        self.assertEqual(r.status_code, 302); self.assertEqual(len(self.requests()), 1)
+        for f in self.requests():
+            os.remove(os.path.join(self.req, f))
+        # Not while the node is stopped on purpose.
+        st = with_validator(running=False); st["stopped"] = {"at": "2026-10-17T19:00:00+00:00"}
+        self.status = st
+        self.c.post("/action/start-validator", base_url=BASE, data={"csrf": tok, "confirmed": "yes"})
+        self.assertEqual(self.requests(), [])
+
+    def test_validator_doppelganger_and_problems(self):
+        from datetime import datetime, timedelta, timezone
+        just = (datetime.now(timezone.utc) - timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%S.123456789Z")
+        st = with_validator(started_at=just, status=3.0, lag_slots=400.0)
+        self.assertEqual(st["validator"]["state"], "doppelganger")
+        self.assertNotIn("missing attestations", st["health"][1])  # expected during the wait
+        st = with_validator(status=3.0, lag_slots=400.0)
+        self.assertIn("validator is missing attestations", st["health"][1])
+        st = with_validator(status=5.0)
+        self.assertEqual(st["health"][0], "red"); self.assertIn("validator is slashing", st["health"][1])
+        st = with_validator(status=3.0, refusals=1.0)
+        self.assertIn("slashing protection refused", st["health"][1])
+        self.assertIsNone(control._age_seconds("garbage"))
+        self.assertLess(abs(control._age_seconds(just) - 180), 5)
 
     def test_action_csrf_and_unknown(self):
         self.login()
