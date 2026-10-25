@@ -9,7 +9,7 @@ control_compose ps || true
 if curl -fsS -m 3 http://127.0.0.1:8090/healthz >/dev/null 2>&1; then echo "  healthz: ok"; else echo "  healthz: not answering"; fi
 echo ""
 echo "=== node-control helper ==="
-for unit in node-control.path node-control-refresh.timer node-control-logs.service; do
+for unit in node-control.path node-control-refresh.timer node-control-watchdog.timer node-control-logs.service; do
   printf '  %-28s %s\n' "${unit}" "$(systemctl is-active "${unit}" 2>/dev/null || true)"
 done
 if [[ -r "${CONTROL_VAR}/state/status.json" ]]; then

@@ -9,18 +9,25 @@ repo owner, which:
             check-updates, apply-update, rollback. Anything else is rejected.
   refresh   writes status.json (git/update state, containers, Debian updates)
             for the page to read. Also run by a timer.
+  watchdog  run every minute by a timer: restarts a container that started
+            without a DNS server, and Prysm when it is stuck at 0 peers.
+            What it does shows in the page's history.
 
 "apply-update" only fast-forwards to what is already merged on origin/main,
 then runs the repo's own scripts (pinned images only). Standard library only.
 """
 import datetime as dt
 import fcntl
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tarfile
 import tempfile
+import time
+import urllib.request
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -104,13 +111,24 @@ def state(name):
     return os.path.join(STATE_DIR, name)
 
 
+class Busy(Exception):
+    """Another node-control run holds the lock (non-blocking callers only)."""
+
+
 class Lock:
     """One node-control run at a time (process and refresh share the repo)."""
+
+    def __init__(self, wait=True):
+        self.wait = wait
 
     def __enter__(self):
         os.makedirs(STATE_DIR, exist_ok=True)
         self.fh = open(state(".lock"), "w")
-        fcntl.flock(self.fh, fcntl.LOCK_EX)
+        try:
+            fcntl.flock(self.fh, fcntl.LOCK_EX if self.wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self.fh.close()
+            raise Busy
         return self
 
     def __exit__(self, *exc):
@@ -506,8 +524,151 @@ def process():
     return handled
 
 
+# --- watchdog -----------------------------------------------------------------
+# Two ways the node failed to recover on its own after a boot where the network
+# came up minutes late:
+#   - Containers on the host network copy /etc/resolv.conf when they start. One
+#     started before DHCP wrote a DNS server keeps an empty copy for good, so
+#     Grafana couldn't look up the SMTP server and every alert email failed.
+#     The Docker drop-in's wait (common.sh) only covers a short delay.
+#   - Prysm started before the network worked, picked an unusable address and
+#     sat at 0 peers for good, so go-pulse stopped following the chain.
+
+RPC_URL = os.environ.get("PULSE_RPC_URL", "http://127.0.0.1:8545")
+BEACON_URL = os.environ.get("PULSE_BEACON_URL", "http://127.0.0.1:3500")
+HOST_RESOLV = os.environ.get("NODE_CONTROL_RESOLV", "/etc/resolv.conf")
+# Never restarted for DNS: neither needs it once running, and restarts cost sync.
+NODE_CLIENTS = ("pulse-geth", "pulse-beacon")
+DNS_RESTART_EVERY = 3600   # at most one DNS restart per container per hour
+PRYSM_ZERO_FOR = 600       # Prysm at 0 peers this long (and up this long) ...
+PRYSM_RESTART_EVERY = 3600  # ... gets a restart, at most this often
+
+
+def has_nameserver(text):
+    return any(line.split()[:1] == ["nameserver"] for line in (text or "").splitlines())
+
+
+def container_resolv(name):
+    """A container's /etc/resolv.conf, read with docker cp (needs no shell in the image)."""
+    env = dict(os.environ)
+    env["PATH"] = env.get("PATH", "/usr/bin:/bin") + ":/usr/sbin:/sbin"
+    try:
+        p = subprocess.run(["docker", "cp", f"{name}:/etc/resolv.conf", "-"], env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30)
+        with tarfile.open(fileobj=io.BytesIO(p.stdout)) as tar:
+            member = tar.next()
+            fh = tar.extractfile(member) if member else None
+            return fh.read().decode(errors="replace") if fh else None
+    except (OSError, subprocess.TimeoutExpired, tarfile.TarError):
+        return None
+
+
+def heal_dns(wd, log, t):
+    """Restart running containers whose resolv.conf has no DNS server, once the host has one."""
+    try:
+        with open(HOST_RESOLV) as fh:
+            if not has_nameserver(fh.read()):
+                return []  # nothing better to give them yet
+    except OSError:
+        return []
+    rc, out = run(["docker", "ps", "--filter", "name=^pulse-", "--format", "{{.Names}}"], timeout=30)
+    if rc != 0:
+        return []
+    done = []
+    last = wd.setdefault("dns_restarts", {})
+    for name in out.split():
+        if name in NODE_CLIENTS or t - last.get(name, 0) < DNS_RESTART_EVERY:
+            continue
+        text = container_resolv(name)
+        if text is None or has_nameserver(text):
+            continue
+        rc, out = run(["docker", "restart", name], timeout=300)
+        log.append(f"$ docker restart {name}   # started without a DNS server\n" + out)
+        last[name] = t
+        done.append((rc == 0, f"restarted {name}: it started without a DNS server"
+                     if rc == 0 else f"restart of {name} (no DNS server) FAILED"))
+    return done
+
+
+def fetch_json(url, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.load(resp)
+    except (OSError, ValueError):
+        return None
+
+
+def peer_counts():
+    """(go-pulse peers, Prysm peers); None for a client that didn't answer."""
+    el = fetch_json(RPC_URL, {"jsonrpc": "2.0", "id": 1, "method": "net_peerCount", "params": []})
+    cl = fetch_json(BEACON_URL + "/eth/v1/node/peer_count")
+    try:
+        el = int(el["result"], 16)
+    except (TypeError, KeyError, ValueError):
+        el = None
+    try:
+        cl = int(cl["data"]["connected"])
+    except (TypeError, KeyError, ValueError):
+        cl = None
+    return el, cl
+
+
+def started_ago(started_at, t):
+    """Seconds since Docker's StartedAt (RFC 3339 with nanoseconds), or 0 if unknown."""
+    try:
+        start = dt.datetime.strptime(started_at[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
+    except (TypeError, ValueError):
+        return 0
+    return t - start.timestamp()
+
+
+def check_prysm(wd, log, t):
+    """Restart Prysm after 10 min at 0 peers while go-pulse has peers (so the network works)."""
+    beacon = container_status().get("pulse-beacon", {})
+    el, cl = peer_counts()
+    stuck = (not os.path.exists(state("stopped.json")) and beacon.get("running")
+             and started_ago(beacon.get("started_at"), t) >= PRYSM_ZERO_FOR
+             and cl == 0 and (el or 0) > 0)
+    if not stuck:
+        wd["prysm_zero_since"] = None
+        return []
+    since = wd.get("prysm_zero_since") or t
+    wd["prysm_zero_since"] = since
+    if t - since < PRYSM_ZERO_FOR or t - wd.get("prysm_restarted", 0) < PRYSM_RESTART_EVERY:
+        return []
+    log.append(f"Prysm has had 0 peers for {int(t - since) // 60} min while go-pulse has {el}.")
+    ok, summary = act_restart(["beacon"])(log)
+    wd["prysm_restarted"], wd["prysm_zero_since"] = t, None
+    return [(ok, f"Prysm stuck at 0 peers: {summary}")]
+
+
+def watchdog(t=None):
+    t = time.time() if t is None else t
+    wd = read_json(state("watchdog.json"), {}) or {}
+    log = []
+    done = heal_dns(wd, log, t) + check_prysm(wd, log, t)
+    write_json(state("watchdog.json"), wd)
+    if done:
+        entry = {"id": uuid.uuid4().hex[:16], "action": "watchdog", "label": "Watchdog",
+                 "by": "watchdog", "started": now(), "finished": now(),
+                 "ok": all(ok for ok, _ in done), "summary": "; ".join(s for _, s in done)}
+        record(entry, log)
+        print(entry["summary"])
+    return done
+
+
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else ""
+    if cmd == "watchdog":
+        # Skip a turn while an action runs (an update restarts things on purpose).
+        try:
+            with Lock(wait=False):
+                watchdog()
+        except Busy:
+            pass
+        return 0
     with Lock():
         if cmd == "process":
             process()

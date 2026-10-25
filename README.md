@@ -300,6 +300,12 @@ A phone-friendly page, served through the HTTPS front end, that shows node healt
   - Restart node / go-pulse / Prysm
   - Stop node (asks for the control page password again) / Start node. A stopped node stays down, even across reboots, until Start, and the page shows a red "stopped on purpose" banner. Wrong passwords count toward the sign-in lockout.
 
+**Watchdog.** A `node-control-watchdog` timer runs the same helper every minute to fix two things that don't recover on their own when the network comes up late after a boot (seen when the host's link was down for its first minutes):
+- **A container that started without a DNS server.** Containers on the host network copy `/etc/resolv.conf` when they start. If DHCP hadn't written a nameserver yet (the Docker drop-in only waits 60 s), the copy stays empty. For Grafana that means every alert email fails with `lookup … on [::1]:53`. Once the host has a nameserver, the watchdog restarts any `pulse-*` container whose copy has none, at most once an hour each. It never restarts go-pulse or Prysm for this.
+- **Prysm stuck at 0 peers.** If Prysm has been up for 10 minutes and had 0 peers for 10 minutes while go-pulse has peers (so the network itself works), it restarts Prysm (with its normal 5-minute clean shutdown), at most once an hour.
+
+It skips a turn while an action is running, and leaves a node that was stopped on purpose alone. Whatever it does shows under **Recent actions** on the page (and in `./control/status.sh`) as "Watchdog", with a log.
+
 **How it stays safe.** The page runs in a container with no Docker socket, a read-only filesystem, no capabilities, and no access to the repo. Pressing a button only drops a small request file in `/var/lib/node-control/requests`. Only the page's user can write there, and only the repo owner can read it. A systemd path unit then runs [`control/node-control.py`](control/node-control.py) **as the repo owner (not root)**. It accepts only the eight actions above and rejects anything else.
 
 **Apply update** fast-forwards to what's already merged on `origin/main`, never anything else. It refuses if the checkout has local changes or isn't on `main`. It then restarts only what changed:
