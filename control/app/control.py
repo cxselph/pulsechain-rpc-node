@@ -53,10 +53,18 @@ ACTIONS = {
                   "Start node. Wallets using this RPC stop working, the downtime counts against uptime (over an "
                   "hour restarts the readiness clock), and Grafana will email a node-down alert."),
     "start-node": ("Start the node", "Starts go-pulse and Prysm. They catch up with the chain within a few minutes."),
+    "stop-validator": ("Stop the validator",
+                       "Stops the validator client and leaves it stopped, even across a reboot or a node restart, "
+                       "until you press Start validator. While it's down it misses every attestation and loses a "
+                       "little balance (about what it would earn), and Grafana emails a validator-down alert. "
+                       "The node keeps running. This is not an exit."),
+    "start-validator": ("Start the validator",
+                        "Starts the validator client again. Doppelganger protection makes it wait 2-3 epochs "
+                        "(about 10-16 minutes) before it signs."),
 }
 
 # Actions that ask for the control page password again on the confirm screen.
-REAUTH_ACTIONS = {"stop-node"}
+REAUTH_ACTIONS = {"stop-node", "stop-validator"}
 # What can still run while the node is stopped on purpose.
 WHILE_STOPPED = {"start-node", "check-updates"}
 
@@ -79,6 +87,20 @@ READINESS_QUERIES = {
     "history_days": "count_over_time(pulse:ready[30d]) / 1440",
     "inbound_avg": "avg_over_time(pulse:inbound_peers[30d])",
 }
+
+# The validator card, from Prometheus (monitoring/). Same expressions as the Validator dashboard.
+VALIDATOR_QUERIES = {
+    "status": "max(validator_statuses)",
+    "balance": "sum(validator_balance)",
+    "lag_slots": "scalar(max(pulse_cl_head_slot)) - max(validator_last_attested_slot)",
+    "refusals": "(sum(validator_attestations_rejected_total) or vector(0)) + (sum(validator_proposals_rejected_total) or vector(0))",
+    "target_24h": "avg(avg_over_time(validator_correctly_voted_target[24h]))",
+    "attested_24h": "sum(increase(validator_successful_attestations[24h]))",
+}
+VALIDATOR_STATUS = {0: "Unknown", 1: "Deposited", 2: "Pending", 3: "Active", 4: "Exiting", 5: "Slashing",
+                    6: "Exited", 7: "Invalid", 8: "Partially deposited"}
+# Doppelganger protection waits 2-3 epochs (32 slots x 10 s) after each start.
+DOPPELGANGER_SECONDS = 3 * 32 * 10
 
 # Console: containers whose recent logs node-logs keeps in STATE_DIR/live.
 CONSOLE_LOGS = {"geth": ("go-pulse", "pulse-geth"), "beacon": ("Prysm", "pulse-beacon")}
@@ -304,6 +326,58 @@ def readiness():
     return data or None
 
 
+_validator_cache = {"at": 0.0, "data": None}
+
+
+def validator_metrics():
+    """Validator numbers from Prometheus; {} when there are none. Cached 60 s."""
+    if _validator_cache["data"] is not None and time.time() - _validator_cache["at"] < 60:
+        return _validator_cache["data"]
+    data = {}
+    try:
+        for key, expr in VALIDATOR_QUERIES.items():
+            data[key] = prom_scalar(expr)
+    except Exception:  # noqa: BLE001 - monitoring not installed or not answering
+        data = {}
+    _validator_cache.update(at=time.time(), data=data)
+    return data
+
+
+def validator_state(s):
+    """What the Validator card shows: off / stopped / waiting / attesting, plus numbers."""
+    helper = s.get("helper") or {}
+    v = dict(helper.get("validator") or {})
+    if not helper.get("validator"):
+        return None  # helper too old to report it
+    c = helper.get("containers", {}).get("pulse-validator", {})
+    v["exists"] = c.get("status") not in (None, "not installed")
+    v["running"] = bool(c.get("running"))
+    v["started_at"] = c.get("started_at")
+    found = validator_metrics() if v.get("enabled") else {}
+    v["has_metrics"] = any(val is not None for val in found.values())
+    v["metrics"] = {key: found.get(key) for key in VALIDATOR_QUERIES}
+    status = v["metrics"].get("status")
+    v["status_text"] = VALIDATOR_STATUS.get(int(status)) if status is not None else None
+    if not v.get("enabled"):
+        v["state"] = "off"
+    elif not v["running"]:
+        v["state"] = "stopped"
+    elif (_age_seconds(v["started_at"]) or DOPPELGANGER_SECONDS) < DOPPELGANGER_SECONDS:
+        v["state"] = "doppelganger"
+    else:
+        v["state"] = "running"
+    return v
+
+
+def _age_seconds(iso):
+    """Seconds since a Docker timestamp (nanosecond fractions are dropped), or None."""
+    try:
+        t = datetime.fromisoformat(re.sub(r"\.\d+", "", iso).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return (datetime.now(timezone.utc) - t).total_seconds()
+
+
 def _post_json(url, method):
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": []}).encode()
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
@@ -450,6 +524,7 @@ def collect_status():
     s["queued"] = len(pending_requests())
     s["history"] = read_history(8)
     s["readiness"] = readiness()
+    s["validator"] = validator_state(s)
     s["health"] = health(s)
     with _cache_lock:
         _cache.update(at=time.time(), data=s)
@@ -489,6 +564,16 @@ def health(s):
     if s.get("stopped"):
         return ("red", f"Node stopped on purpose ({fmt_ago(s['stopped'].get('at'))}). "
                        "It stays down until you press Start node.")
+    v = s.get("validator") or {}
+    vm = v.get("metrics") or {}
+    if v.get("state") == "stopped":
+        problems.append("validator switched on but not running (it's missing attestations)")
+    if vm.get("refusals"):
+        problems.append("validator slashing protection refused to sign")
+    if vm.get("status") is not None and 4 <= vm["status"] <= 6:
+        problems.append(f"validator is {VALIDATOR_STATUS.get(int(vm['status']), '?').lower()}")
+    if v.get("state") == "running" and vm.get("status") == 3 and (vm.get("lag_slots") or 0) > 128:
+        problems.append("validator is missing attestations")
     if not el.get("up"):
         problems.append("go-pulse is not answering")
     if not cl.get("up"):
@@ -532,6 +617,14 @@ def action_blocked(name, s):
         return "The node is stopped on purpose. Press Start node first."
     if name == "stop-node" and s.get("stopped"):
         return "The node is already stopped."
+    if name in ("stop-validator", "start-validator"):
+        v = s.get("validator") or {}
+        if not v.get("enabled") or not v.get("exists"):
+            return "The validator isn't switched on. Switching it on is done over SSH: sudo ./validator/enable.sh"
+        if name == "stop-validator" and not v.get("running"):
+            return "The validator is already stopped."
+        if name == "start-validator" and v.get("running"):
+            return "The validator is already running."
     if name == "apply-update":
         if not repo.get("behind"):
             return "Already up to date. Use Check for updates first."

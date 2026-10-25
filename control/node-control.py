@@ -6,7 +6,8 @@ files into the requests directory. A systemd path unit starts this script as the
 repo owner, which:
 
   process   handles each request: restart-node, restart-geth, restart-beacon,
-            check-updates, apply-update, rollback. Anything else is rejected.
+            check-updates, apply-update, rollback, stop/start-node and
+            stop/start-validator. Anything else is rejected.
   refresh   writes status.json (git/update state, containers, Debian updates)
             for the page to read. Also run by a timer.
   watchdog  run every minute by a timer: restarts a container that started
@@ -38,7 +39,7 @@ BRANCH = "main"
 REMOTE = "origin"
 CONTAINERS = [
     "pulse-geth", "pulse-beacon", "pulse-caddy", "pulse-control",
-    "pulse-grafana", "pulse-prometheus", "pulse-node-exporter",
+    "pulse-grafana", "pulse-prometheus", "pulse-node-exporter", "pulse-validator",
 ]
 MAX_REQUEST_BYTES = 4096
 KEEP_LOGS = 30
@@ -53,6 +54,8 @@ ACTIONS = {
     "rollback": "Roll back the last update",
     "stop-node": "Stop the node (go-pulse + Prysm)",
     "start-node": "Start the node (go-pulse + Prysm)",
+    "stop-validator": "Stop the validator",
+    "start-validator": "Start the validator",
 }
 
 
@@ -228,8 +231,10 @@ def repo_status(fetch):
 def container_status():
     rc, out = run(["docker", "inspect", *CONTAINERS], timeout=30)
     result = {}
+    # A container that doesn't exist (the validator while switched off) makes docker
+    # append "Error: No such object" to the JSON, so decode just the array.
     try:
-        items = json.loads(out) if out.strip().startswith("[") else []
+        items = json.JSONDecoder().raw_decode(out, out.index("["))[0] if "[" in out else []
     except ValueError:
         items = []
     for item in items:
@@ -246,6 +251,36 @@ def container_status():
     for name in CONTAINERS:
         result.setdefault(name, {"status": "not installed", "running": False})
     return result
+
+
+def env_value(path, key):
+    """KEY's value in a dotenv file (not executed), or ""."""
+    try:
+        with open(path) as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return ""
+    val = ""
+    for line in lines:
+        m = re.match(rf"^\s*(?:export\s+)?{key}\s*=\s*(.*)$", line)
+        if m:
+            val = m.group(1).strip().strip('"').strip("'")
+    return val
+
+
+def validator_status():
+    """Switched on? (validator/enable.sh's marker) and its public settings."""
+    data_dir = env_value(os.path.join(REPO, ".env"), "DATA_DIR") or "/blockchain"
+    marker = os.path.join(data_dir, "validator", "ENABLED")
+    info = {"enabled": os.path.exists(marker), "since": None,
+            "fee_recipient": env_value(os.path.join(REPO, "validator", ".env"), "FEE_RECIPIENT")}
+    if info["enabled"]:
+        try:
+            with open(marker) as fh:
+                info["since"] = fh.read().strip() or None
+        except OSError:
+            pass
+    return info
 
 
 def system_status():
@@ -269,6 +304,7 @@ def refresh(fetch=True):
         "repo": repo_status(fetch),
         "containers": container_status(),
         "system": system_status(),
+        "validator": validator_status(),
     }
     write_json(state("status.json"), status)
     return status
@@ -421,6 +457,20 @@ def act_start(log):
     return True, "node started"
 
 
+def act_stop_validator(log):
+    # validator/stop.sh clears the resume marker, so a node restart won't bring it back.
+    rc, out = run(["./validator/stop.sh"], timeout=300)
+    log.append("$ ./validator/stop.sh\n" + out)
+    return rc == 0, ("validator stopped: it stays down until Start validator" if rc == 0 else "stop FAILED (see log)")
+
+
+def act_start_validator(log):
+    rc, out = run(["./validator/resume.sh"], timeout=120)
+    log.append("$ ./validator/resume.sh\n" + out)
+    return rc == 0, ("validator started: doppelganger wait of 2-3 epochs before it signs" if rc == 0
+                     else "start FAILED (see log)")
+
+
 HANDLERS = {
     "restart-node": act_restart([]),
     "restart-geth": act_restart(["geth"]),
@@ -430,6 +480,8 @@ HANDLERS = {
     "rollback": act_rollback,
     "stop-node": act_stop,
     "start-node": act_start,
+    "stop-validator": act_stop_validator,
+    "start-validator": act_start_validator,
 }
 assert set(HANDLERS) == set(ACTIONS)
 

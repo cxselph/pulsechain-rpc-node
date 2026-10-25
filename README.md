@@ -300,6 +300,7 @@ A phone-friendly page, served through the HTTPS front end, that shows node healt
 - **Status:** a green / yellow / red banner; sync progress (with an ETA if monitoring is installed); peers; beacon; disk; Debian updates; go-pulse / Prysm versions; the fork commit; and whether `main` has updates (with the commit list and any image-pin changes). It refreshes on its own.
 - **Wallet settings:** network name, RPC URL (`https://<host>`), chain ID 369, symbol, explorer and WebSocket, each with a Copy button. In a browser with MetaMask (desktop extension or MetaMask's in-app browser), **Add to MetaMask** fills them in.
 - **Validator readiness** (if monitoring is installed): ready now and which part fails, clean days toward 30, ready % (goal 99.5%), 30-day uptime, downtime, outages and inbound peers.
+- **Validator** (once `validator/` is set up): switched off, stopped, doppelganger wait or attesting; status, balance, slots since the last attestation, target votes over 24 h, slashing-protection refusals and the fee recipient (numbers from the monitoring stack). A switched-on validator that isn't running, one that's missing attestations, slashed or exiting, or slashing protection refusing to sign turns the banner red. Switching it on stays an SSH step (`sudo ./validator/enable.sh`).
 - **Console** (`/console`): the last 500 lines of go-pulse and Prysm logs, updating every 3 s, with the sync numbers on top, a "sync lines only" filter, pause, and warnings/errors coloured. It's read-only. A separate `node-control-logs` service follows `docker logs` as the repo owner and keeps those lines in `/var/lib/node-control/state/live/`, so the page still has no Docker access.
 - **Actions** (each behind a confirm screen, one at a time, all logged with output):
   - Check for updates
@@ -307,6 +308,7 @@ A phone-friendly page, served through the HTTPS front end, that shows node healt
   - Roll back
   - Restart node / go-pulse / Prysm
   - Stop node (asks for the control page password again) / Start node. A stopped node stays down, even across reboots, until Start, and the page shows a red "stopped on purpose" banner. Wrong passwords count toward the sign-in lockout.
+  - Stop validator (asks for the password again) / Start validator, on the Validator card. A validator stopped here stays down across reboots and node restarts until Start validator; Stop node stops it too, and Start node brings it back only if it was running. Start validator only works for a switched-on validator.
 
 **Watchdog.** A `node-control-watchdog` timer runs the same helper every minute to fix two things that don't recover on their own when the network comes up late after a boot (seen when the host's link was down for its first minutes):
 - **A container that started without a DNS server.** Containers on the host network copy `/etc/resolv.conf` when they start. If DHCP hadn't written a nameserver yet (the Docker drop-in only waits 60 s), the copy stays empty. For Grafana that means every alert email fails with `lookup … on [::1]:53`. Once the host has a nameserver, the watchdog restarts any `pulse-*` container whose copy has none, at most once an hour each. It never restarts go-pulse or Prysm for this.
@@ -390,7 +392,7 @@ Then, in the Tailscale admin console:
 | Import keystores (from the offline machine's USB stick) | `sudo ./validator/import-keys.sh /media/usb/validator_keys` |
 | Switch on and start | `sudo ./validator/enable.sh` (asks you to confirm, then starts) |
 | Status / logs | `./validator/status.sh`, `./validator/logs.sh` |
-| Stop / start again | `sudo ./validator/stop.sh`, `sudo ./validator/start.sh` |
+| Stop / start again | `./validator/stop.sh`, `./validator/resume.sh` (or Stop / Start validator on the control page) |
 | Apply `.env` or image changes | `sudo ./validator/restart.sh` |
 | Switch off (not an exit) | `sudo ./validator/disable.sh` |
 | Before moving it to another machine | `sudo ./validator/stop.sh`, wait 2 epochs, `sudo ./validator/export-slashing.sh` |
@@ -398,7 +400,7 @@ Then, in the Tailscale admin console:
 
 Monitoring (dashboard and alerts) is described under "Optional: monitoring" above; after updating, run `./monitoring/install.sh` once so the status helper reports the switch.
 
-`./stop.sh` stops the validator before the node, and `./start.sh` brings back a switched-on validator after the node. When an update changes `validator/`, Apply update lists `sudo ./validator/restart.sh` as a manual step instead of restarting it, because every restart costs a doppelganger wait.
+`./stop.sh` stops the validator before the node, and `./start.sh` brings it back after the node if it was running. A validator stopped on its own (`./validator/stop.sh` or the control page) stays down until `./validator/resume.sh`. When an update changes `validator/`, Apply update lists `sudo ./validator/restart.sh` as a manual step instead of restarting it, because every restart costs a doppelganger wait.
 
 ## Dependency updates
 

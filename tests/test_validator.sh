@@ -142,11 +142,51 @@ done
 grep -q '^val_stop$' "${ROOT}/stop.sh" && pass "stop.sh stops the validator before the node" || fail "stop.sh should call val_stop"
 awk '/val_stop/{v=NR} /run_compose down/{d=NR} END{exit !(v && d && v < d)}' "${ROOT}/stop.sh" \
   && pass "stop.sh: validator first, then the node" || fail "stop.sh must stop the validator before compose down"
-grep -q 'VAL_ENABLED' "${ROOT}/start.sh" && grep -q 'run_docker start "${VALIDATOR_CONTAINER}"' "${ROOT}/start.sh" \
-  && pass "start.sh brings back a switched-on validator" || fail "start.sh should restart a stopped, switched-on validator"
+grep -q 'touch "${VAL_RESUME_FILE}"' "${ROOT}/stop.sh" && grep -q 'val_resume' "${ROOT}/start.sh" \
+  && pass "start.sh brings back a validator that stop.sh stopped" || fail "stop.sh should mark a running validator and start.sh resume it"
+grep -q 'rm -f "${VAL_RESUME_FILE}"' "${VAL}/stop.sh" && pass "validator/stop.sh keeps it down across node restarts" \
+  || fail "validator/stop.sh should clear the resume marker"
 grep -q '"pulse-validator")' "${ROOT}/control/node-control.py" && pass "watchdog never restarts the validator" \
   || fail "pulse-validator should be in the watchdog's NODE_CLIENTS"
 grep -qx '\.env' "${ROOT}/.gitignore" && pass "validator/.env is gitignored" || fail ".env should be gitignored"
+
+# --- Node stop/start and the validator, against a fake docker ---------------------
+fake="${TMP}/fakebin"; dstate="${TMP}/docker"; mkdir -p "${fake}" "${dstate}"
+cat > "${fake}/docker" <<'FAKE'
+#!/usr/bin/env bash
+D="${FAKE_DOCKER_STATE}"
+name="${*: -1}"
+case "$1" in
+  info) exit 0 ;;
+  inspect)
+    if [[ "$2" == "-f" ]]; then cat "${D}/running-${name}" 2>/dev/null || echo false
+    else [[ -e "${D}/exists-${name}" ]] && echo '[{}]' || exit 1; fi ;;
+  stop) echo false > "${D}/running-${name}"; echo "stop ${name}" >> "${D}/calls" ;;
+  start) echo true > "${D}/running-${name}"; echo "start ${name}" >> "${D}/calls" ;;
+  compose) echo "compose ${*:2}" >> "${D}/calls" ;;
+esac
+FAKE
+chmod +x "${fake}/docker"
+node() {  # node() <script>: run a node script with the fake docker and temp validator paths
+  PATH="${fake}:${PATH}" FAKE_DOCKER_STATE="${dstate}" VAL_DATA="${TMP}/data" \
+    VAL_RESUME_FILE="${TMP}/resume" bash "$@" >/dev/null 2>&1
+}
+calls() { cat "${dstate}/calls" 2>/dev/null || true; }
+: > "${dstate}/calls"; touch "${dstate}/exists-pulse-validator"; echo true > "${dstate}/running-pulse-validator"
+node "${ROOT}/stop.sh"
+[[ -e "${TMP}/resume" && "$(calls)" == "stop pulse-validator"$'\n'"compose down" ]] \
+  && pass "stop.sh: validator stopped first and marked to come back" || fail "stop.sh order/marker wrong: $(calls | tr '\n' ';')"
+: > "${dstate}/calls"; node "${ROOT}/start.sh"
+[[ ! -e "${TMP}/resume" && "$(calls)" == *"start pulse-validator"* ]] \
+  && pass "start.sh brings the validator back" || fail "start.sh should resume the validator: $(calls | tr '\n' ';')"
+node "${VAL}/stop.sh"; node "${ROOT}/stop.sh"; : > "${dstate}/calls"; node "${ROOT}/start.sh"
+[[ "$(calls)" != *"start pulse-validator"* ]] \
+  && pass "a validator stopped on purpose stays down across a node stop/start" || fail "start.sh resumed a validator stopped on purpose"
+: > "${dstate}/calls"; node "${VAL}/resume.sh"
+[[ "$(calls)" == "start pulse-validator" ]] && pass "validator/resume.sh starts it again (no sudo)" || fail "resume.sh should start it: $(calls | tr '\n' ';')"
+rm -f "${VAL_ENABLED}"; node "${ROOT}/stop.sh"; rm -f "${dstate}/exists-pulse-validator"; : > "${dstate}/calls"
+if node "${VAL}/resume.sh"; then fail "resume.sh should refuse a switched-off validator"; else
+  [[ -z "$(calls)" ]] && pass "resume.sh refuses a switched-off validator" || fail "resume.sh touched docker: $(calls)"; fi
 
 # --- The pinned image accepts every flag we pass ------------------------------------
 if [[ -n "${VALIDATOR_TEST_IMAGE:-}${CI:-}" ]] && command -v docker >/dev/null 2>&1; then

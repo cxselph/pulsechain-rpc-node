@@ -17,6 +17,9 @@ VAL_ENABLED="${VAL_DATA}/ENABLED"
 VAL_PASSWORD_FILE="${VAL_DATA}/wallet-password.txt"
 # Written by `accounts import` (Prysm's "direct" imported wallet).
 VAL_KEYSTORE="${VAL_DATA}/wallet/direct/accounts/all-accounts.keystore.json"
+# Written by ./stop.sh when it stopped a running validator, so ./start.sh brings
+# it back. A validator stopped on its own (validator/stop.sh) stays down.
+VAL_RESUME_FILE="${VAL_RESUME_FILE:-${VAL_DIR}/.resume-with-node}"
 VAL_STOP_TIMEOUT_SEC=120
 ZERO_ADDRESS="0x0000000000000000000000000000000000000000"
 }
@@ -101,6 +104,21 @@ val_stop() {
     echo "Stopping the validator (up to ${VAL_STOP_TIMEOUT_SEC} s)..."
     run_docker stop -t "${VAL_STOP_TIMEOUT_SEC}" "${VALIDATOR_CONTAINER}" >/dev/null
   fi
+}
+
+# Starts the existing container of a switched-on validator. Needs no root: it
+# passed the start checks when it was created. Returns 1 if there's nothing to start.
+val_resume() {
+  if val_running; then
+    echo "The validator is already running."
+    return 0
+  fi
+  if [[ ! -e "${VAL_ENABLED}" ]] || ! val_exists; then
+    echo "The validator isn't switched on, so there's nothing to start. Switch it on over SSH: sudo ./validator/enable.sh" >&2
+    return 1
+  fi
+  run_docker start "${VALIDATOR_CONTAINER}" >/dev/null
+  echo "Validator started again (doppelganger wait: 2-3 epochs before it signs)."
 }
 
 require_root() {
