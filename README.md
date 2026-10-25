@@ -372,6 +372,28 @@ Then, in the Tailscale admin console:
 
 ---
 
+## Optional: validator client (off by default)
+
+`validator/` adds a Prysm-Pulse validator client as its own Compose project (`pulse-validator`). **Nothing in it runs until you switch it on**, and the node's scripts never start it on their own. Staking takes 32,000,000 PLS per validator, and the keys are generated **offline** with PulseChain's [staking-deposit-cli](https://gitlab.com/pulsechaincom/staking-deposit-cli). This repo never generates keys or holds a mnemonic.
+
+- **Data:** `${DATA_DIR}/validator/` (wallet, wallet password file, slashing-protection DB, exports). Keep that disk **out of VM backups and snapshots**: restoring an older slashing-protection DB, or starting a restored copy while the original runs, is how validators get slashed.
+- **Safety built in:** doppelganger protection on every start (it waits 2–3 epochs before signing), no fee-recipient default (Prysm's default would burn the tips), the start checks below, only the local beacon (no ports, no web UI), metrics on `127.0.0.1:8081`, and the watchdog and Apply update never restart it.
+- **Start checks** (`./validator/start.sh` refuses unless all hold): switched on (`${DATA_DIR}/validator/ENABLED`), `FEE_RECIPIENT` in `validator/.env` is a real address and not the zero address, keys are imported, and the wallet password file is root-only (600).
+
+| Step | Command |
+|---|---|
+| Settings | `cp validator/.env.example validator/.env`, then set `FEE_RECIPIENT` |
+| Import keystores (from the offline machine's USB stick) | `sudo ./validator/import-keys.sh /media/usb/validator_keys` |
+| Switch on and start | `sudo ./validator/enable.sh` (asks you to confirm, then starts) |
+| Status / logs | `./validator/status.sh`, `./validator/logs.sh` |
+| Stop / start again | `sudo ./validator/stop.sh`, `sudo ./validator/start.sh` |
+| Apply `.env` or image changes | `sudo ./validator/restart.sh` |
+| Switch off (not an exit) | `sudo ./validator/disable.sh` |
+| Before moving it to another machine | `sudo ./validator/stop.sh`, wait 2 epochs, `sudo ./validator/export-slashing.sh` |
+| On the new machine, before its first start | `sudo ./validator/import-slashing.sh <file>` |
+
+`./stop.sh` stops the validator before the node, and `./start.sh` brings back a switched-on validator after the node. When an update changes `validator/`, Apply update lists `sudo ./validator/restart.sh` as a manual step instead of restarting it, because every restart costs a doppelganger wait.
+
 ## Dependency updates
 
 Nothing upstream reaches the node without review:
@@ -596,11 +618,13 @@ pulsechain-rpc-node/
 │   ├── test_monitoring.sh
 │   ├── test_proxy.sh
 │   ├── test_control.sh
-│   └── test_tailscale.sh
+│   ├── test_tailscale.sh
+│   └── test_validator.sh
 ├── monitoring/               # optional Grafana + Prometheus stack (see above)
 ├── proxy/                    # optional HTTPS front end (Caddy)
 ├── control/                  # optional control page + node-control helper
 ├── tailscale/                # optional access over Tailscale (one-name DNS)
+├── validator/                # optional validator client, off by default
 ```
 
 ---

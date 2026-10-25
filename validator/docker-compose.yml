@@ -1,0 +1,45 @@
+# pulsechain-rpc-node — optional validator client (Prysm-Pulse)
+# Separate Compose project, so the node's own scripts never start it.
+# OFF by default: nothing runs until ./validator/enable.sh (see "Optional: validator client" in README.md).
+# Always start it with ./validator/start.sh, which checks the setup first.
+#
+# Data lives in ${DATA_DIR}/validator (the chain disk). Keep that disk out of
+# VM backups: restoring an old slashing-protection DB is how double-signing happens.
+#
+# Talks only to the local beacon (gRPC 127.0.0.1:4000). No ports to open.
+# Metrics: 127.0.0.1:8081/metrics
+#
+# Image pinned by tag + digest (same release as the beacon). Change it only
+# through a reviewed PR, together with VALIDATOR_IMAGE_PINNED in lib.sh.
+
+name: pulse-validator
+
+services:
+  validator:
+    image: registry.gitlab.com/pulsechaincom/prysm-pulse/validator:v2.3.0@sha256:ade27eff3b3586cabd073bb14a70831ee7c143f1a7de1bec019d0e54e5261346
+    container_name: pulse-validator
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 2m
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    volumes:
+      - ${DATA_DIR:-/blockchain}/validator:/validator-data
+    command:
+      - --pulsechain
+      - --wallet-dir=/validator-data/wallet
+      - --wallet-password-file=/validator-data/wallet-password.txt
+      # Slashing-protection DB. export-slashing.sh / import-slashing.sh use the same path.
+      - --datadir=/validator-data/db
+      - --beacon-rpc-provider=127.0.0.1:${BEACON_GRPC_PORT:-4000}
+      - --beacon-rest-api-provider=http://127.0.0.1:${BEACON_HTTP_PORT:-3500}
+      # Prysm's default is the zero address, which burns the tips. No default here.
+      - --suggested-fee-recipient=${FEE_RECIPIENT:?set FEE_RECIPIENT in validator/.env}
+      # Waits 2-3 epochs on every start to make sure these keys aren't signing elsewhere.
+      - --enable-doppelganger
+      - --graffiti=${VALIDATOR_GRAFFITI:-}
+      - --monitoring-host=127.0.0.1
+      - --monitoring-port=${VALIDATOR_METRICS_PORT:-8081}
