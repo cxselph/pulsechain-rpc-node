@@ -213,7 +213,7 @@ Graphs, history and email alerts for the node, all running on the node host and 
 | Prometheus (`127.0.0.1:9090`) | Scrapes go-pulse, Prysm and node_exporter every 15 s; keeps 30 days (`$DATA_DIR/monitoring/prometheus`) |
 | node_exporter (`127.0.0.1:9100`) | Host CPU, memory, disk, network |
 | `pulse-node-metrics` timer | Every 30 s, a small read-only helper asks go-pulse and Prysm what `status.sh` asks (sync, blocks, peers, `el_offline`) and writes it for node_exporter. It runs as an unprivileged systemd `DynamicUser` that can only talk to localhost. |
-| Grafana (`127.0.0.1:3000/grafana/`) | Dashboards ("PulseChain node overview", "Node Exporter Full") and alerts by email |
+| Grafana (`127.0.0.1:3000/grafana/`) | Dashboards ("PulseChain node overview", "Validator readiness", "Validator", "Node Exporter Full") and alerts by email |
 
 **Install** (after the node is running):
 
@@ -236,6 +236,10 @@ The 30-day bar: **30 clean days** (no outage over an hour, meaning an hour with 
 The **Validator readiness** dashboard shows ready-now, **clean days** toward 30 (days since the last outage over an hour; short planned reboots don't reset them), ready % over 30 days (goal ≥ 99.5%), 30-day uptime / downtime / outages, peers and inbound peers, clock offset, memory / swap / I/O headroom and chain-disk days left, the last reboot's resync time, plus the checks that have to be done by hand (drive wear, reboot drills, UPS, key plan). Prometheus keeps 45 days, so the 30-day window is always complete.
 
 **Alerts** (email, repeated every 12 h while active): go-pulse or Prysm not answering, a scrape target down, the status helper stopped, initial sync stalled for 1 h, the newest block over 2 minutes old for 3 minutes (once the node has been synced in the last 2 days; it doesn't rely on `eth_syncing`), beacon more than 50 slots behind, fewer than 5 peers, beacon reports go-pulse offline after sync, a disk over 85%, chain disk full within 30 days at the current rate, and a client restarting repeatedly, the clock out of sync for 15 min, and no inbound peers for 6 h after the initial sync (port forwards broken).
+
+**Validator** (only once `validator/` is switched on). Prometheus also scrapes the validator client (`127.0.0.1:8081`), and the **Validator** dashboard shows switched on / status / balance, slots since the last attestation, slashing-protection refusals, the last 24 h (attestations made and failed, correct target votes, balance change, next proposal) and graphs of balance, attestation lag and votes. Its alerts (group `pulsechain-validator`, unit-tested with `promtool`) stay quiet while the validator is switched off, because the status helper reports the `ENABLED` marker as `pulse_validator_enabled`:
+- **critical:** client down 5 min; attestations missing for over 4 epochs (or none 30 min after a start); slashed, exiting or exited; slashing protection refused to sign (another copy of the keys is running, or an old DB)
+- **warning:** no correct target vote for 30 min; balance under 32M and falling
 
 **What these alerts can't see.** Grafana runs on the node host, so it can't email you when that host is off, or its network is down. Run an outside check on another machine for that (one that alerts when `https://<host>` stops answering, or its newest block gets old).
 
@@ -391,6 +395,8 @@ Then, in the Tailscale admin console:
 | Switch off (not an exit) | `sudo ./validator/disable.sh` |
 | Before moving it to another machine | `sudo ./validator/stop.sh`, wait 2 epochs, `sudo ./validator/export-slashing.sh` |
 | On the new machine, before its first start | `sudo ./validator/import-slashing.sh <file>` |
+
+Monitoring (dashboard and alerts) is described under "Optional: monitoring" above; after updating, run `./monitoring/install.sh` once so the status helper reports the switch.
 
 `./stop.sh` stops the validator before the node, and `./start.sh` brings back a switched-on validator after the node. When an update changes `validator/`, Apply update lists `sudo ./validator/restart.sh` as a manual step instead of restarting it, because every restart costs a doppelganger wait.
 

@@ -144,6 +144,26 @@ else
   fail "Clean days expression differs between validator-readiness.json, control/app/control.py and readiness_test.yml"
 fi
 
+# --- Validator alerts: tested in promtool, and silent while switched off ----------
+val_uids="$(grep -oE 'uid: pulse-val-[a-z-]+' "${rules}" | awk '{print $2}')"
+if [[ "$(wc -w <<<"${val_uids}")" -ge 6 ]]; then pass "$(wc -w <<<"${val_uids}" | tr -d ' ') validator alert rules"; else fail "expected at least 6 pulse-val-* rules"; fi
+for uid in ${val_uids}; do
+  expr="$(awk -v u="uid: ${uid}" '$0 ~ u"$" {f=1} f && /expr:/ {sub(/^ *expr: \x27/, ""); sub(/\x27$/, ""); print; exit}' "${rules}")"
+  if [[ -n "${expr}" ]] && grep -qF "expr: '${expr}'" "${ROOT}/tests/promtool/validator_alerts_test.yml"; then
+    pass "${uid}: expression has a promtool test"
+  else
+    fail "${uid}: expression differs from tests/promtool/validator_alerts_test.yml (or has no test)"
+  fi
+  [[ "${expr}" == *"and on() max(pulse_validator_enabled) == 1)" ]] && pass "${uid}: only while switched on" \
+    || fail "${uid}: must end with 'and on() max(pulse_validator_enabled) == 1' so it stays quiet while switched off"
+done
+grep -qE 'targets: \["127\.0\.0\.1:8081"\]' "${MON}/prometheus/prometheus.yml" && pass "Prometheus scrapes the validator on 127.0.0.1:8081" \
+  || fail "prometheus.yml should scrape the validator at 127.0.0.1:8081"
+grep -q '^Environment=PULSE_VALIDATOR_ENABLED=@DATA_DIR@/validator/ENABLED$' "${MON}/exporter/pulse-node-metrics.service" \
+  && grep -q 's#@DATA_DIR@#${DATA_DIR}#g' "${MON}/install.sh" \
+  && pass "status helper looks for ENABLED under DATA_DIR (filled in by install.sh)" \
+  || fail "pulse-node-metrics.service should get PULSE_VALIDATOR_ENABLED from DATA_DIR via install.sh"
+
 # --- Prometheus config is valid and the readiness rules behave (promtool) -------
 prom_image="$(grep -E '^\s+image: prom/prometheus' "${compose}" | awk '{print $2}')"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
@@ -157,6 +177,12 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   else
     docker run --rm --entrypoint promtool -v "${MON}/prometheus:/rules:ro" -v "${ROOT}/tests/promtool:/t:ro" "${prom_image}" test rules /t/readiness_test.yml || true
     fail "readiness rule tests failed"
+  fi
+  if docker run --rm --entrypoint promtool -v "${ROOT}/tests/promtool:/t:ro" "${prom_image}" test rules /t/validator_alerts_test.yml >/dev/null 2>&1; then
+    pass "promtool test rules: validator alerts"
+  else
+    fail "promtool validator alert tests failed:"
+    docker run --rm --entrypoint promtool -v "${ROOT}/tests/promtool:/t:ro" "${prom_image}" test rules /t/validator_alerts_test.yml || true
   fi
 elif in_ci; then
   fail "docker needed for promtool check"
@@ -257,6 +283,14 @@ m = run(url, url, out, boot=now - 1200)
 report = [k for k in m if k.startswith("pulse_resync_report{")]
 assert len(report) == 1 and 'verdict="OVER the 15 min target"' in report[0], report
 print("PASS: resync after reboot")
+
+# Validator switch: 0 without the ENABLED marker, 1 with it.
+marker = os.path.join(tempfile.mkdtemp(), "ENABLED")
+os.environ["PULSE_VALIDATOR_ENABLED"] = marker
+expect(run(url, url), pulse_validator_enabled=0)
+open(marker, "w").write("2026-10-25T00:00:00Z\n")
+expect(run(url, url), pulse_validator_enabled=1)
+print("PASS: helper reports the validator switch")
 
 m = run("http://127.0.0.1:9", "http://127.0.0.1:9")
 expect(m, pulse_el_up=0, pulse_cl_up=0)
