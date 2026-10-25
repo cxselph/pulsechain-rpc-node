@@ -226,14 +226,16 @@ nano monitoring/.env             # SMTP server/user/password, sender, ALERT_EMAI
 **Open Grafana** from your computer through an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 <user>@<node>`, then http://localhost:3000/grafana/ (user `admin`). Send a test email under Alerting → Contact points → email → Test.
 
 **Validator readiness.** Prometheus records readiness signals every minute (`monitoring/prometheus/rules.yml`, unit-tested with `promtool`):
-- **synced:** both clients up, go-pulse not syncing, beacon ≤ 2 slots behind
+- **synced:** both clients up, go-pulse not syncing, beacon ≤ 2 slots behind, newest block under a minute old (`eth_syncing` alone can say "not syncing" while the node has stopped following the chain)
 - **peers:** go-pulse ≥ 25, Prysm ≥ 30
 - **clock:** synchronized and within 0.5 s
 - **ready:** all three at once
 
 The **Validator readiness** dashboard shows ready-now, the streak toward 30 days in a row, 30-day uptime / downtime / outages, peers and inbound peers, clock offset, memory / swap / I/O headroom and chain-disk days left, the last reboot's resync time, plus the checks that have to be done by hand (drive wear, reboot drills, UPS, key plan). Prometheus keeps 45 days, so the 30-day window is always complete.
 
-**Alerts** (email, repeated every 12 h while active): go-pulse or Prysm not answering, a scrape target down, the status helper stopped, initial sync stalled for 1 h, chain head stopped for 10 min, beacon more than 50 slots behind, fewer than 5 peers, beacon reports go-pulse offline after sync, a disk over 85%, chain disk full within 30 days at the current rate, and a client restarting repeatedly, the clock out of sync for 15 min, and no inbound peers for 6 h after the initial sync (port forwards broken).
+**Alerts** (email, repeated every 12 h while active): go-pulse or Prysm not answering, a scrape target down, the status helper stopped, initial sync stalled for 1 h, the newest block over 2 minutes old for 3 minutes (once the node has been synced in the last 2 days; it doesn't rely on `eth_syncing`), beacon more than 50 slots behind, fewer than 5 peers, beacon reports go-pulse offline after sync, a disk over 85%, chain disk full within 30 days at the current rate, and a client restarting repeatedly, the clock out of sync for 15 min, and no inbound peers for 6 h after the initial sync (port forwards broken).
+
+**What these alerts can't see.** Grafana runs on the node host, so it can't email you when that host is off, or its network is down. Run an outside check on another machine for that (one that alerts when `https://<host>` stops answering, or its newest block gets old).
 
 **Resync after a reboot.** The status helper notes when the VM booted, when both clients answered again, and when the node was back in sync (go-pulse not syncing with its newest block under a minute old, Prysm within 2 slots). After each reboot of the VM or the host, you get **one report email** with those times, the boot-to-synced time against the 15-minute target, and the whole outage including shutdown. If it isn't back in sync 15 minutes after boot, a warning email goes out right away. The Validator readiness dashboard shows the last reboot's times. Times are accurate to the helper's 30-second interval. Only reboots are timed. Restarting the containers alone isn't.
 

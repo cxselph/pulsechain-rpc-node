@@ -127,6 +127,14 @@ else
   fail "Chain disk days left expression in validator-readiness.json differs from tests/promtool/readiness_test.yml"
 fi
 
+# Same for the head-age alert (pulse-head-stalled).
+head_expr="$(grep -m1 -oE "count\(max\(pulse_el_head_age_seconds\).*\)'$" "${ROOT}/tests/promtool/readiness_test.yml" | sed "s/'\$//")"
+if [[ -n "${head_expr}" ]] && grep -qF "expr: '${head_expr}'" "${rules}"; then
+  pass "head-age alert matches its promtool test"
+else
+  fail "pulse-head-stalled expression in rules.yml differs from tests/promtool/readiness_test.yml"
+fi
+
 # --- Prometheus config is valid and the readiness rules behave (promtool) -------
 prom_image="$(grep -E '^\s+image: prom/prometheus' "${compose}" | awk '{print $2}')"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then

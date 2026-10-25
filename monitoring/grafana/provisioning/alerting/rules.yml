@@ -153,7 +153,7 @@ groups:
             datasourceUid: prometheus
             model:
               refId: A
-              expr: 'count(pulse_el_syncing == 0 and delta(pulse_el_current_block[10m]) <= 0 and count_over_time(pulse_el_current_block[10m]) > 30)'
+              expr: 'count(max(pulse_el_head_age_seconds) > 120 and on() max_over_time(pulse:synced[2d]) == 1)'
               instant: true
               range: false
           - refId: C
@@ -164,13 +164,13 @@ groups:
               expression: A
               conditions:
                 - evaluator: { type: gt, params: [0] }
-        for: 5m
+        for: 3m
         noDataState: OK
         execErrState: Error
         labels: { severity: critical }
         annotations:
-          summary: 'The node is synced but has not imported a new block in 10 minutes (PulseChain makes one every 10 seconds).'
-          description: 'Check ./status.sh (peers, el_offline) and ./logs.sh.'
+          summary: 'The newest block go-pulse has is over 2 minutes old (PulseChain makes one every 10 seconds), so the node has stopped following the chain. eth_syncing may still say false.'
+          description: 'Check ./status.sh: Prysm peers (0 peers means it cannot hear the network; the watchdog restarts it after 10 min), el_offline, and ./logs.sh beacon. Only after the node has been synced at some point in the last 2 days, so an initial sync does not trip it.'
       - uid: pulse-behind
         title: 'Beacon node falling behind'
         condition: C
