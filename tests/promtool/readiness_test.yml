@@ -1,5 +1,5 @@
 # promtool unit tests for monitoring/prometheus/rules.yml (validator readiness)
-# and the streak / uptime expressions the dashboard and control page use.
+# and the clean-days / uptime expressions the dashboard and control page use.
 rule_files:
   - /rules/rules.yml
 evaluation_interval: 1m
@@ -101,7 +101,7 @@ tests:
       - {expr: 'pulse:both_up', eval_time: 3m, exp_samples: [{labels: 'pulse:both_up', value: 0}]}
       - {expr: 'pulse:ready', eval_time: 3m, exp_samples: [{labels: 'pulse:ready', value: 0}]}
 
-  # Streak and uptime: down for minutes 10-19, healthy otherwise; evaluate at 2h.
+  # Clean days and uptime: down for minutes 10-19, healthy otherwise; evaluate at 2h.
   - interval: 1m
     input_series:
       - {series: 'pulse_el_up{job="node"}', values: '1x9 0x9 1x110'}
@@ -114,10 +114,11 @@ tests:
       - {series: 'node_timex_sync_status{job="node"}', values: '1x130'}
       - {series: 'node_timex_offset_seconds{job="node"}', values: '0x130'}
     promql_expr_test:
-      # Last not-ready minute was 19m -> streak at 120m is 101 minutes.
-      - expr: 'round((time() - max_over_time(pulse:not_ready_at[45d])) / 60)'
+      # Clean days (in minutes here): a 10-minute outage doesn't reset them. The first
+      # two minutes count as "no data for the last hour", so they run from 1m.
+      - expr: 'round(((time() - max_over_time(pulse:long_outage_at[45d])) / 86400 or count_over_time(pulse:clean_watch[45d]) / 1440) * 1440)'
         eval_time: 120m
-        exp_samples: [{labels: '{}', value: 101}]
+        exp_samples: [{labels: '{}', value: 119}]
       # 10 of 121 evaluated minutes down.
       - expr: 'round((1 - avg_over_time(pulse:both_up[30d])) * count_over_time(pulse:both_up[30d]))'
         eval_time: 120m
@@ -125,6 +126,42 @@ tests:
       - expr: 'ceil(changes(pulse:both_up[30d]) / 2)'
         eval_time: 120m
         exp_samples: [{labels: '{}', value: 1}]
+
+  # Clean days after an outage over an hour (like 2026-10-24: ~70 min not following
+  # the chain): down minutes 120-189. The last minute that closes a whole hour
+  # without a ready minute is 189m, so at 300m they're 111 minutes.
+  - interval: 1m
+    input_series:
+      - {series: 'pulse_el_up{job="node"}', values: '1x119 0x69 1x120'}
+      - {series: 'pulse_cl_up{job="node"}', values: '1x310'}
+      - {series: 'pulse_el_syncing{job="node"}', values: '0x310'}
+      - {series: 'pulse_cl_sync_distance{job="node"}', values: '0x310'}
+      - {series: 'pulse_el_head_age_seconds{job="node"}', values: '5x310'}
+      - {series: 'pulse_el_peers{job="node"}', values: '40x310'}
+      - {series: 'pulse_cl_peers{job="node"}', values: '45x310'}
+      - {series: 'node_timex_sync_status{job="node"}', values: '1x310'}
+      - {series: 'node_timex_offset_seconds{job="node"}', values: '0x310'}
+    promql_expr_test:
+      - expr: 'round(((time() - max_over_time(pulse:long_outage_at[45d])) / 86400 or count_over_time(pulse:clean_watch[45d]) / 1440) * 1440)'
+        eval_time: 300m
+        exp_samples: [{labels: '{}', value: 111}]
+
+  # A 30-minute outage (a planned reboot, a UPS test) doesn't reset them.
+  - interval: 1m
+    input_series:
+      - {series: 'pulse_el_up{job="node"}', values: '1x119 0x29 1x160'}
+      - {series: 'pulse_cl_up{job="node"}', values: '1x310'}
+      - {series: 'pulse_el_syncing{job="node"}', values: '0x310'}
+      - {series: 'pulse_cl_sync_distance{job="node"}', values: '0x310'}
+      - {series: 'pulse_el_head_age_seconds{job="node"}', values: '5x310'}
+      - {series: 'pulse_el_peers{job="node"}', values: '40x310'}
+      - {series: 'pulse_cl_peers{job="node"}', values: '45x310'}
+      - {series: 'node_timex_sync_status{job="node"}', values: '1x310'}
+      - {series: 'node_timex_offset_seconds{job="node"}', values: '0x310'}
+    promql_expr_test:
+      - expr: 'round(((time() - max_over_time(pulse:long_outage_at[45d])) / 86400 or count_over_time(pulse:clean_watch[45d]) / 1440) * 1440)'
+        eval_time: 300m
+        exp_samples: [{labels: '{}', value: 299}]
 
   # Chain disk forecast (Grafana rule pulse-disk-trend; test_monitoring.sh checks
   # the expression below matches rules.yml). 1-minute samples.

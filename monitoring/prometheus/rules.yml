@@ -1,11 +1,15 @@
 # Validator readiness signals, evaluated every minute. Each is a single
-# unlabeled 0/1 series (missing data counts as 0), so dashboards can average,
-# count and streak them. The bar (tune here if needed):
+# unlabeled 0/1 series (missing data counts as 0), so dashboards can average
+# and count them. The bar (tune here if needed):
 #   synced  both clients answering, go-pulse not syncing, beacon <= 2 slots behind,
 #           newest go-pulse block under a minute old
 #   peers   go-pulse >= 25 and Prysm >= 30
 #   clock   kernel clock synchronized and within 0.5 s
 #   ready   all three at once
+# The 30-day bar on top of these (dashboard, control page, promtool test):
+# "clean days" since the last outage over an hour (an hour with no ready
+# minute, or no data at all), and ready >= 99.5% of the last 30 days. Short
+# planned reboots don't reset it.
 groups:
   - name: pulse-readiness
     interval: 1m
@@ -25,9 +29,15 @@ groups:
            * max(abs(node_timex_offset_seconds) < bool 0.5)) or vector(0)
       - record: pulse:ready
         expr: pulse:synced * pulse:peers_ok * pulse:clock_ok
-      # Exists only while not ready, valued with the time: the readiness streak
-      # is time() - max_over_time(pulse:not_ready_at[45d]) (no subquery).
-      - record: pulse:not_ready_at
-        expr: timestamp(pulse:ready == 0)
+      # Inside an outage over an hour: no ready minute in the last hour, or next to no
+      # data for it (Prometheus or the host was off). Clean days count from the last one.
+      - record: pulse:long_outage_at
+        expr: >-
+          timestamp(max_over_time(pulse:ready[1h]) == 0)
+          or timestamp(count_over_time(pulse:ready[1h]) <= 2)
+      # Always 1. Before the first long outage these rules see, clean days are the
+      # minutes they have run (so they start at 0 when first installed).
+      - record: pulse:clean_watch
+        expr: vector(1)
       - record: pulse:inbound_peers
         expr: max(p2p_peers_inbound{job="go-pulse"}) or vector(0)

@@ -101,18 +101,19 @@
   <p class="hint">Tracked by the monitoring stack (./monitoring/install.sh). Nothing to show yet.</p>
   {% else %}
   <p class="big">{% if r.ready == 1 %}<span class="good">Ready</span>{% else %}<span class="bad">Not ready</span>{% endif %}
-    <span class="hint">· {{ '%.1f' % (r.streak_days or 0) }} of 30 days in a row</span></p>
-  <progress max="30" value="{{ [r.streak_days or 0, 30] | min }}"></progress>
+    <span class="hint">· {{ '%.1f' % ([r.clean_days or 0, r.history_days or 0] | min) }} of 30 clean days</span></p>
+  <progress max="30" value="{{ [r.clean_days or 0, r.history_days or 0, 30] | min }}"></progress>
   <dl>
     <dt>Right now</dt><dd>
       <span class="{{ 'good' if r.synced == 1 else 'bad' }}">synced</span> ·
       <span class="{{ 'good' if r.peers_ok == 1 else 'bad' }}">peers</span> ·
       <span class="{{ 'good' if r.clock_ok == 1 else 'bad' }}">clock</span></dd>
+    <dt>Ready (30 d)</dt><dd class="{{ 'bad' if r.ready_pct is not none and r.ready_pct < 99.5 }}">{{ '%.2f' % r.ready_pct if r.ready_pct is not none else '—' }}% · goal 99.5%</dd>
     <dt>Uptime (30 d)</dt><dd class="{{ 'bad' if r.uptime_pct is not none and r.uptime_pct < 99.5 }}">{{ '%.2f' % r.uptime_pct if r.uptime_pct is not none else '—' }}%{% if r.downtime_min %} · {{ r.downtime_min | num }} min down, {{ r.outages | num }} outage{{ 's' if r.outages != 1 }}{% endif %}</dd>
     <dt>Inbound peers</dt><dd class="{{ 'bad' if r.inbound_avg is not none and r.inbound_avg < 1 }}">{{ '%.1f' % r.inbound_avg if r.inbound_avg is not none else '—' }} on average</dd>
     <dt>History</dt><dd>{{ '%.1f' % (r.history_days or 0) }} of 30 days recorded</dd>
   </dl>
-  <p class="hint">Ready = synced, go-pulse ≥ 25 and Prysm ≥ 30 peers, clock within 0.5 s. <a href="/grafana/d/pulse-validator-readiness" target="grafana" rel="noopener">Details in Grafana</a></p>
+  <p class="hint">Ready = synced, go-pulse ≥ 25 and Prysm ≥ 30 peers, clock within 0.5 s. Clean days = since the last outage over an hour; short reboots don't reset them. <a href="/grafana/d/pulse-validator-readiness" target="grafana" rel="noopener">Details in Grafana</a></p>
   {% endif %}
 </section>
 

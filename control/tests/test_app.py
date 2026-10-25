@@ -27,7 +27,7 @@ def fake_status(**over):
                             "head_short": "abc1234", "rollback_to": None, "blocked_reasons": []},
                    "containers": {"pulse-geth": {"running": True, "status": "running"}}, "system": {}},
         "running": None, "queued": 0, "history": [],
-        "readiness": {"ready": 0.0, "synced": 0.0, "peers_ok": 1.0, "clock_ok": 1.0, "streak_days": 0.0,
+        "readiness": {"ready": 0.0, "synced": 0.0, "peers_ok": 1.0, "clock_ok": 1.0, "clean_days": 0.0, "ready_pct": 99.2,
                       "uptime_pct": 99.9, "downtime_min": 12.0, "outages": 1.0, "history_days": 3.5, "inbound_avg": 4.2},
     }
     for k, v in over.items():
@@ -250,7 +250,9 @@ class AppTest(unittest.TestCase):
         self.login()
         html = self.c.get("/fragment/status", base_url=BASE).get_data(as_text=True)
         self.assertIn("Validator readiness", html); self.assertIn("Not ready", html)
-        self.assertIn("0.0 of 30 days in a row", html); self.assertIn("99.90%", html); self.assertIn("12 min down, 1 outage", html)
+        self.assertIn("0.0 of 30 clean days", html); self.assertIn("99.90%", html)
+        self.assertIn("99.20% · goal 99.5%", html)  # ready % below the goal is marked
+        self.assertRegex(html, r'<dd class="bad">99\.20%'); self.assertIn("12 min down, 1 outage", html)
         self.status = fake_status(readiness=None)
         html = self.c.get("/fragment/status", base_url=BASE).get_data(as_text=True)
         self.assertIn("./monitoring/install.sh", html)

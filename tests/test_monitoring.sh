@@ -135,6 +135,15 @@ else
   fail "pulse-head-stalled expression in rules.yml differs from tests/promtool/readiness_test.yml"
 fi
 
+# The dashboard's "Clean days" tile, the control page and the promtool test use one expression.
+clean_expr="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print([p for p in d["panels"] if p.get("title")=="Clean days"][0]["targets"][0]["expr"])' "${MON}/grafana/dashboards/validator-readiness.json" 2>/dev/null)"
+if [[ -n "${clean_expr}" ]] && grep -qF "\"clean_days\": \"${clean_expr}\"" "${ROOT}/control/app/control.py" \
+   && grep -qF "round((${clean_expr}) * 1440)" "${ROOT}/tests/promtool/readiness_test.yml"; then
+  pass "clean days: dashboard, control page and promtool test agree"
+else
+  fail "Clean days expression differs between validator-readiness.json, control/app/control.py and readiness_test.yml"
+fi
+
 # --- Prometheus config is valid and the readiness rules behave (promtool) -------
 prom_image="$(grep -E '^\s+image: prom/prometheus' "${compose}" | awk '{print $2}')"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
@@ -144,7 +153,7 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     fail "promtool check config failed"
   fi
   if docker run --rm --entrypoint promtool -v "${MON}/prometheus:/rules:ro" -v "${ROOT}/tests/promtool:/t:ro" "${prom_image}" test rules /t/readiness_test.yml >/dev/null 2>&1; then
-    pass "promtool test rules: readiness signals, streak, downtime, outages"
+    pass "promtool test rules: readiness signals, clean days, downtime, outages"
   else
     docker run --rm --entrypoint promtool -v "${MON}/prometheus:/rules:ro" -v "${ROOT}/tests/promtool:/t:ro" "${prom_image}" test rules /t/readiness_test.yml || true
     fail "readiness rule tests failed"
