@@ -19,6 +19,8 @@ import urllib.request
 RPC_URL = os.environ.get("PULSE_RPC_URL", "http://127.0.0.1:8545")
 BEACON_URL = os.environ.get("PULSE_BEACON_URL", "http://127.0.0.1:3500")
 OUT_DIR = os.environ.get("STATE_DIRECTORY", "/var/lib/pulse-node-metrics")
+# Present only while the validator is switched on (validator/enable.sh).
+VALIDATOR_ENABLED = os.environ.get("PULSE_VALIDATOR_ENABLED", "/blockchain/validator/ENABLED")
 OUT_FILE = "pulse_node.prom"
 RESYNC_FILE = "resync.json"
 TIMEOUT = 5
@@ -135,6 +137,9 @@ def collect():
         put("pulse_cl_up", "1 if the Prysm beacon API answered", 0)
         print(f"beacon API: {exc}", file=sys.stderr)
 
+    # Gates the validator alerts, so a switched-off validator raises nothing.
+    put("pulse_validator_enabled", "1 while the validator is switched on (validator/enable.sh)",
+        int(os.path.exists(VALIDATOR_ENABLED)))
     put("pulse_metrics_last_run_timestamp_seconds", "When this helper last ran", int(time.time()))
     return metrics
 

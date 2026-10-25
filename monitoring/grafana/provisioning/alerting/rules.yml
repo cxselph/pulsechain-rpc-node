@@ -449,3 +449,173 @@ groups:
         annotations:
           summary: 'The VM booted over 15 minutes ago and the node is still not back in sync. The report email follows once it is.'
           description: 'Check ./status.sh (peers, sync distance) and ./logs.sh. The Validator readiness dashboard shows the resync time once it finishes.'
+  # Validator (validator/). Every rule is gated on pulse_validator_enabled, which the
+  # status helper sets from the ENABLED marker, so nothing fires while it's switched off.
+  # The expressions are unit-tested in tests/promtool/validator_alerts_test.yml.
+  - orgId: 1
+    name: pulsechain-validator
+    folder: PulseChain
+    interval: 1m
+    rules:
+      - uid: pulse-val-down
+        title: 'Validator client is down'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count((up{job="validator"} == 0 or absent(up{job="validator"})) and on() max(pulse_validator_enabled) == 1)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: 'The validator is switched on, but Prometheus hasn''t reached its client for 5 minutes. While it''s down it misses every attestation and loses a little balance.'
+          description: 'On the VM: ./validator/status.sh and ./validator/logs.sh. If it was stopped on purpose, start it with sudo ./validator/start.sh (or switch it off with sudo ./validator/disable.sh).'
+      - uid: pulse-val-missed
+        title: 'Validator is missing attestations'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(((scalar(max(pulse_cl_head_slot)) - validator_last_attested_slot > 128) or (validator_statuses == 3 unless on(pubkey) validator_last_attested_slot and on() time() - max(process_start_time_seconds{job="validator"}) > 1800)) and on(pubkey) validator_statuses == 3 and on() max(pulse_validator_enabled) == 1)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: 'An active validator hasn''t attested for over 4 epochs (about 21 minutes), or not at all in the 30 minutes since its client started. Doppelganger protection only explains the first 2-3 epochs after a start.'
+          description: 'On the VM: ./validator/logs.sh (look for errors submitting attestations), ./status.sh (is the beacon synced, with peers?). Check the clock: timedatectl.'
+      - uid: pulse-val-wrong-target
+        title: 'Validator votes keep missing the target'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(max_over_time(validator_correctly_voted_target[30m]) == 0 and on(pubkey) validator_correctly_voted_target offset 29m and on(pubkey) validator_statuses == 3 and on() max(pulse_validator_enabled) == 1)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'For 30 minutes (about 6 epochs) none of this validator''s attestations voted the correct target, so they earn little or nothing. Usually the beacon node is behind or has too few peers.'
+          description: 'Check the Node overview dashboard (beacon slots behind, Prysm peers) and ./validator/logs.sh (Previous epoch voting summary).'
+      - uid: pulse-val-balance
+        title: 'Validator balance falling below 32M'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(validator_balance < 32000000 and validator_balance < validator_balance offset 1h and on(pubkey) validator_statuses == 3 and on() max(pulse_validator_enabled) == 1)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: 'An active validator''s balance is below 32,000,000 PLS and lower than an hour ago, so it is losing principal (offline, or voting badly).'
+          description: 'See the Validator dashboard (attestations, votes) and ./validator/logs.sh. Withdrawals never take the balance below 32M, so this is penalties.'
+      - uid: pulse-val-exiting
+        title: 'Validator is slashed, exiting or exited'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count(validator_statuses >= 4 and validator_statuses <= 6 and on() max(pulse_validator_enabled) == 1)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: 'The beacon chain reports a validator as exiting, slashed or exited. If you didn''t start a voluntary exit, treat this as a slashing.'
+          description: 'Status codes: 4 exiting, 5 slashing, 6 exited. Stop it (sudo ./validator/stop.sh), check where else the keys could be running, and look the validator up on the beacon explorer.'
+      - uid: pulse-val-protection
+        title: 'Slashing protection refused to sign'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'count((validator_attestations_rejected_total > 0 or validator_proposals_rejected_total > 0) and on() max(pulse_validator_enabled) == 1)'
+              instant: true
+              range: false
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: 'The validator''s slashing-protection DB refused to sign something it would have been slashed for. That means another copy of these keys is running, or this DB was restored from an older copy. The alert stays until the client restarts.'
+          description: 'Stop every other machine that might hold these keys first. Then: ./validator/logs.sh. Don''t restart this one until you know why.'

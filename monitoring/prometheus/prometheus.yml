@@ -19,6 +19,12 @@ scrape_configs:
     static_configs:
       - targets: ["127.0.0.1:8080"]
 
+  # Optional validator client (validator/). Down while it's switched off; the
+  # validator alerts only look at it when pulse_validator_enabled is 1.
+  - job_name: validator
+    static_configs:
+      - targets: ["127.0.0.1:8081"]
+
   # VM metrics plus the node status written by the pulse-node-metrics timer.
   - job_name: node
     static_configs:

@@ -46,7 +46,9 @@ ok "monitoring/.env has the alert email settings (mode 600)"
 info "Installing the node status helper (pulse-node-metrics)..."
 $SUDO install -d -m 0755 "${MON_HELPER_DIR}"
 $SUDO install -m 0755 "${MON_DIR}/exporter/pulse-node-metrics.py" "${MON_HELPER_DIR}/pulse-node-metrics.py"
-$SUDO install -m 0644 "${MON_DIR}/exporter/pulse-node-metrics.service" /etc/systemd/system/pulse-node-metrics.service
+sed "s#@DATA_DIR@#${DATA_DIR}#g" "${MON_DIR}/exporter/pulse-node-metrics.service" \
+  | $SUDO tee /etc/systemd/system/pulse-node-metrics.service >/dev/null
+$SUDO chmod 0644 /etc/systemd/system/pulse-node-metrics.service
 $SUDO install -m 0644 "${MON_DIR}/exporter/pulse-node-metrics.timer" /etc/systemd/system/pulse-node-metrics.timer
 $SUDO systemctl daemon-reload
 # Run once now so the output directory exists before node_exporter mounts it.

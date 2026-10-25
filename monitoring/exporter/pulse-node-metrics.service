@@ -6,6 +6,8 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 /usr/local/lib/pulsechain-rpc-node/pulse-node-metrics.py
+# install.sh fills in DATA_DIR.
+Environment=PULSE_VALIDATOR_ENABLED=@DATA_DIR@/validator/ENABLED
 # Unprivileged, read-only system, localhost network only.
 DynamicUser=yes
 StateDirectory=pulse-node-metrics
