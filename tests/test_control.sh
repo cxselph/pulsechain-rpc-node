@@ -29,7 +29,7 @@ if grep -qE 'ports:|0\.0\.0\.0' "${c}"; then fail "control page must not publish
 grep -q -- '"--bind", "127.0.0.1:8090"' "${CTL}/Dockerfile" && pass "gunicorn binds 127.0.0.1:8090" || fail "gunicorn must bind 127.0.0.1"
 grep -q 'reverse_proxy 127.0.0.1:8090' "${ROOT}/proxy/Caddyfile" && grep -q 'handle_errors 502 503' "${ROOT}/proxy/Caddyfile" \
   && pass "Caddy routes / to the control page, landing page as fallback" || fail "Caddyfile should proxy / to 127.0.0.1:8090 with a fallback"
-for u in node-control.service node-control-refresh.service; do
+for u in node-control.service node-control-refresh.service node-control-watchdog.service; do
   grep -q '^User=@USER@$' "${CTL}/systemd/${u}" && ! grep -q '^User=root' "${CTL}/systemd/${u}" && pass "${u} runs as the repo owner, not root" || fail "${u} must run as @USER@"
 done
 
