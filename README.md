@@ -397,6 +397,9 @@ Then, in the Tailscale admin console:
 | Switch off (not an exit) | `sudo ./validator/disable.sh` |
 | Before moving it to another machine | `sudo ./validator/stop.sh`, wait 2 epochs, `sudo ./validator/export-slashing.sh` |
 | On the new machine, before its first start | `sudo ./validator/import-slashing.sh <file>` |
+| Voluntary exit (permanent) | `sudo ./validator/exit.sh` |
+
+**Procedures** (first switch-on, restarts and updates, moving it, restoring the VM or losing its data, adding a validator, exiting, suspected double-signing): [validator/RUNBOOK.md](validator/RUNBOOK.md). Read the moving and restoring sections before touching backups or a second machine.
 
 Monitoring (dashboard and alerts) is described under "Optional: monitoring" above; after updating, run `./monitoring/install.sh` once so the status helper reports the switch.
 
