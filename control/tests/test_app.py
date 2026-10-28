@@ -88,7 +88,8 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.c.get("/fragment/status", base_url=BASE).status_code, 401)
 
     def test_home_screen_files_are_public(self):
-        for path, ctype in (("/apple-touch-icon.png", "image/png"), ("/icon-512.png", "image/png"),
+        for path, ctype in (("/favicon.ico", "image/vnd.microsoft.icon"),
+                            ("/apple-touch-icon.png", "image/png"), ("/icon-512.png", "image/png"),
                             ("/manifest.webmanifest", "application/manifest+json"),
                             ("/static/favicon.svg", "image/svg+xml"), ("/static/favicon-32.png", "image/png")):
             r = self.c.get(path, base_url=BASE)  # signed out
