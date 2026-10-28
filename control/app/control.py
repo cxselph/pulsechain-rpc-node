@@ -21,8 +21,10 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, sen
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
-# Served at the site root and before sign-in: Safari fetches these without the session.
+# Served at the site root and before sign-in: Safari fetches these without the session, and other
+# pages (e.g. a links dashboard) look for /favicon.ico.
 HOME_SCREEN_FILES = {
+    "favicon.ico": "image/vnd.microsoft.icon",
     "apple-touch-icon.png": "image/png",
     "icon-512.png": "image/png",
     "manifest.webmanifest": "application/manifest+json",
