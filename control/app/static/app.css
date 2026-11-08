@@ -51,7 +51,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.link { border: 0; background: none; padding: 0; color: var(--accent); }
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
 label { display: block; margin-bottom: 6px; color: var(--muted); }
-input[type=password] { width: 100%; font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); margin-bottom: 14px; }
+input[type=password], input[type=text] { width: 100%; font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); margin-bottom: 14px; }
 code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
 pre { white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; max-height: 70vh; overflow: auto; }
 ul.commits, ul.history, ul.containers { list-style: none; padding: 0; margin: 8px 0; }
@@ -77,3 +77,6 @@ pre.console.nowrap div { white-space: pre; word-break: normal; }
 .console-box:fullscreen pre.console { flex: 1; height: auto; margin: 0; }
 pre.console .warn { color: #e3b341; }
 pre.console .err { color: #ff6b6b; }
+code.wrap { word-break: break-all; }
+#validator-checks { margin-top: 12px; }
+form.row.tight input[type=text] { flex: 1 1 320px; margin: 0; }

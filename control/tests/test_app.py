@@ -217,6 +217,138 @@ class AppTest(unittest.TestCase):
         html = self.c.get("/", base_url=BASE).get_data(as_text=True)
         self.assertIn("Start the node", html); self.assertNotIn("Stop the node", html)
 
+    # --- on-chain key check -------------------------------------------------------
+    PK = "0x" + "ab" * 48
+    ADDR = "0xea4225FC2DfC4c51B351bFdfAD2E1Dc9Fe64894d"
+
+    @staticmethod
+    def deposit_log(pubkey, address, amount_gwei=32_000_000 * 10**9, index=7, block=1000):
+        """An ABI-encoded DepositEvent, as eth_getLogs returns it."""
+        wc = bytes.fromhex("01" + "00" * 11 + address[2:].lower())
+        fields = [bytes.fromhex(pubkey[2:]), wc, amount_gwei.to_bytes(8, "little"), b"\x11" * 96, index.to_bytes(8, "little")]
+        head, tail = b"", b""
+        for f in fields:
+            head += (5 * 32 + len(tail)).to_bytes(32, "big")
+            tail += len(f).to_bytes(32, "big") + f + b"\x00" * (-len(f) % 32)
+        return {"data": "0x" + (head + tail).hex(), "blockNumber": hex(block), "transactionHash": "0x" + "cd" * 32}
+
+    def fake_chain(self, beacon=None, logs=(), beacon_fail=False, rpc_fail=False):
+        """Point the check at canned answers instead of the node."""
+        seen = {}
+        orig_get, orig_rpc = control._get_json, control._rpc
+
+        def get_json(url, timeout=3):
+            seen["beacon_url"] = url
+            if beacon_fail:
+                raise OSError("connection refused")
+            if beacon == 404:
+                raise control.urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+            return {"data": [beacon] if beacon else []}
+
+        def rpc(method, params, timeout=15):
+            if rpc_fail:
+                raise OSError("rpc down")
+            if method == "eth_blockNumber":
+                return hex(100_000)
+            seen["logs_filter"] = params[0]
+            return list(logs)
+        control._get_json, control._rpc = get_json, rpc
+        self.addCleanup(setattr, control, "_get_json", orig_get)
+        self.addCleanup(setattr, control, "_rpc", orig_rpc)
+        return seen
+
+    def beacon_entry(self, status="active_ongoing", address=None, slashed=False):
+        wc = "0x01" + "00" * 11 + (address or self.ADDR)[2:].lower()
+        return {"index": "4242", "status": status, "balance": "32000001000000000",
+                "validator": {"pubkey": self.PK, "withdrawal_credentials": wc, "effective_balance": "32000000000000000",
+                              "slashed": slashed, "activation_eligibility_epoch": "10", "activation_epoch": "12",
+                              "exit_epoch": "18446744073709551615"}}
+
+    def test_parse_deposit_log_and_withdrawal_target(self):
+        d = control.parse_deposit_log(self.deposit_log(self.PK, self.ADDR)["data"])
+        self.assertEqual(d["pubkey"], self.PK)
+        self.assertEqual(d["amount_gwei"], 32_000_000 * 10**9); self.assertEqual(d["index"], 7)
+        self.assertEqual(control.withdrawal_target(d["withdrawal_credentials"]),
+                         ("0x01 (execution address)", self.ADDR.lower()))
+        self.assertIsNone(control.withdrawal_target("0x00" + "11" * 31)[1])
+
+    def test_check_no_deposit_yet(self):
+        seen = self.fake_chain(beacon=None, logs=[self.deposit_log("0x" + "cd" * 48, self.ADDR)])  # someone else's key
+        r = control.chain_check(self.PK, self.ADDR)
+        self.assertEqual(r["verdict"][:2], ("green", "No deposit for this key yet"))
+        self.assertIsNone(r["beacon"]); self.assertEqual(r["recent"], [])
+        self.assertIn("?id=" + self.PK, seen["beacon_url"])
+        f = seen["logs_filter"]
+        self.assertEqual(f["address"], control.DEPOSIT_CONTRACT); self.assertEqual(f["topics"], [control.DEPOSIT_EVENT_TOPIC])
+        self.assertEqual(int(f["fromBlock"], 16), 100_000 - control.DEPOSIT_SCAN_BLOCKS)
+        self.fake_chain(beacon=404)  # Prysm may answer 404 for an unknown key
+        self.assertEqual(control.chain_check(self.PK, self.ADDR)["verdict"][0], "green")
+
+    def test_check_front_run_deposit_is_red(self):
+        self.fake_chain(logs=[self.deposit_log(self.PK, "0x" + "66" * 20)])
+        r = control.chain_check(self.PK, self.ADDR)
+        self.assertEqual(r["verdict"][:2], ("red", "Withdrawal credentials don't match your address"))
+        self.assertIs(r["recent"][0]["withdrawal"]["matches"], False)
+
+    def test_check_own_deposit_pending_then_active(self):
+        self.fake_chain(logs=[self.deposit_log(self.PK, self.ADDR)])
+        r = control.chain_check(self.PK, self.ADDR)
+        self.assertEqual(r["verdict"][:2], ("yellow", "Deposit seen, not processed yet"))
+        self.assertIs(r["recent"][0]["withdrawal"]["matches"], True)
+        self.fake_chain(beacon=self.beacon_entry("pending_queued"))
+        self.assertEqual(control.chain_check(self.PK, self.ADDR)["verdict"][:2], ("green", "On chain: Pending"))
+        self.fake_chain(beacon=self.beacon_entry("active_ongoing"))
+        r = control.chain_check(self.PK, self.ADDR.lower())
+        self.assertEqual(r["verdict"][:2], ("green", "On chain: Active"))
+        self.assertEqual(r["beacon"]["index"], "4242"); self.assertIs(r["beacon"]["withdrawal"]["matches"], True)
+        self.fake_chain(beacon=self.beacon_entry("active_ongoing", address="0x" + "66" * 20))
+        self.assertEqual(control.chain_check(self.PK, self.ADDR)["verdict"][0], "red")
+        self.fake_chain(beacon=self.beacon_entry("active_slashed", slashed=True))
+        self.assertEqual(control.chain_check(self.PK, self.ADDR)["verdict"][0], "red")
+
+    def test_check_errors_are_yellow_not_green(self):
+        self.fake_chain(beacon_fail=True)
+        self.assertEqual(control.chain_check(self.PK, self.ADDR)["verdict"][:2], ("yellow", "Couldn't check the beacon state"))
+        self.fake_chain(rpc_fail=True)
+        self.assertEqual(control.chain_check(self.PK, self.ADDR)["verdict"][0], "yellow")
+
+    def test_check_without_expected_address_does_not_compare(self):
+        self.fake_chain(beacon=self.beacon_entry("active_ongoing", address="0x" + "66" * 20))
+        r = control.chain_check(self.PK, "")
+        self.assertEqual(r["verdict"][:2], ("green", "On chain: Active")); self.assertIsNone(r["beacon"]["withdrawal"]["matches"])
+
+    def test_check_page(self):
+        self.assertEqual(self.c.get("/validator/check", base_url=BASE).status_code, 302)  # signed out
+        self.login()
+        self.fake_chain(beacon=self.beacon_entry("pending_initialized"))
+        orig = (control.CHECK_PUBKEYS, control.CHECK_ADDRESS)
+        self.addCleanup(lambda: setattr(control, "CHECK_PUBKEYS", orig[0]) or setattr(control, "CHECK_ADDRESS", orig[1]))
+        control.CHECK_PUBKEYS, control.CHECK_ADDRESS = [self.PK], self.ADDR
+        html = self.c.get("/validator/check?mode=status", base_url=BASE).get_data(as_text=True)
+        for text in ("Validator status on chain", "On chain: Pending", self.PK, "pending_initialized", "4242",
+                     "32,000,001 PLS", self.ADDR.lower(), "matches", "control/.env"):
+            self.assertIn(text, html)
+        html = self.c.get("/validator/check", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Deposits for the validator key", html)
+        r = self.c.get("/validator/check?pubkey=0x1234", base_url=BASE)
+        self.assertEqual(r.status_code, 400); self.assertIn("isn&#39;t a validator public key", r.get_data(as_text=True))
+        other = "cd" * 48  # pasted without 0x
+        self.fake_chain(beacon=None)
+        html = self.c.get(f"/validator/check?pubkey={other}", base_url=BASE).get_data(as_text=True)
+        self.assertIn("0x" + other, html); self.assertIn("No deposit for this key yet", html)
+        control.CHECK_PUBKEYS = []
+        html = self.c.get("/validator/check", base_url=BASE).get_data(as_text=True)
+        self.assertIn("No validator key to check", html)
+
+    def test_check_buttons_on_validator_card(self):
+        self.login()
+        self.status = with_validator(enabled=False)
+        html = self.c.get("/", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Check deposits", html); self.assertIn("Check status &amp; withdrawal", html)
+        self.assertIn('href="/validator/check?mode=status"', html)
+        self.status = with_validator(status=3.0)
+        self.assertIn("Check deposits", self.c.get("/", base_url=BASE).get_data(as_text=True))
+
     # --- validator card ----------------------------------------------------------
     def test_no_validator_card_without_helper_report(self):
         self.login()

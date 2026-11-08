@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Validator key check{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('index') }}#validator">← Back</a></p>
+<h1>{{ 'Validator status on chain' if mode == 'status' else 'Deposits for the validator key' }}</h1>
+<p class="hint">Read-only. Asks this node's beacon state and scans the deposit contract
+  (<code>{{ DEPOSIT_CONTRACT }}</code>) for the last ~3.5 days. Nothing is signed or sent.</p>
+{% if error %}<p class="msg error">{{ error }}</p>{% endif %}
+{% if not reports and not error %}
+<p class="msg error">No validator key to check. Add <code>VALIDATOR_PUBKEYS=0x…</code> to <code>control/.env</code>
+  (then <code>./control/restart.sh</code>), or paste a key below.</p>
+{% endif %}
+
+{% for r in reports %}
+{% set lvl, head, detail = r.verdict %}
+<div class="banner {{ lvl }}"><strong>{{ head }}</strong><span>{{ detail }}</span></div>
+<section class="card">
+  <h2>Key</h2>
+  <p><code class="wrap">{{ r.pubkey }}</code></p>
+  {% if r.expected %}<p class="hint">Expected withdrawal address ({{ expected_from }}): <code>{{ r.expected }}</code></p>
+  {% else %}<p class="hint">No expected withdrawal address set (<code>VALIDATOR_WITHDRAWAL_ADDRESS</code> in control/.env), so credentials are shown but not compared.</p>{% endif %}
+</section>
+
+<div class="grid">
+  <section class="card" id="status">
+    <h2>Status (beacon state)</h2>
+    {% if r.beacon_error is defined %}<p class="bad">Couldn't ask the beacon node: {{ r.beacon_error }}</p>
+    {% elif not r.beacon %}<p class="big">Not on chain</p><p class="hint">The beacon state has no validator with this key. Before the deposit, that's what you want.</p>
+    {% else %}{% set b = r.beacon %}
+    <p class="big {{ 'good' if b.label == 'Active' else 'bad' if b.slashed else '' }}">{{ b.label }}</p>
+    <dl>
+      <dt>Status</dt><dd><code>{{ b.status }}</code> · {{ b.detail }}</dd>
+      <dt>Index</dt><dd>{{ b.index }}</dd>
+      <dt>Balance</dt><dd>{{ b.balance_pls | num }} PLS (effective {{ b.effective_pls | num }})</dd>
+      <dt>Eligible at epoch</dt><dd>{{ b.eligibility_epoch if b.eligibility_epoch != '18446744073709551615' else 'not yet' }}</dd>
+      <dt>Active from epoch</dt><dd>{{ b.activation_epoch if b.activation_epoch != '18446744073709551615' else 'not yet' }}</dd>
+      {% if b.exit_epoch and b.exit_epoch != '18446744073709551615' %}<dt>Exit epoch</dt><dd>{{ b.exit_epoch }}</dd>{% endif %}
+      {% if b.slashed %}<dt>Slashed</dt><dd class="bad">yes</dd>{% endif %}
+    </dl>
+    {% endif %}
+  </section>
+
+  <section class="card" id="withdrawal">
+    <h2>Withdrawal credentials</h2>
+    {% set w = r.beacon.withdrawal if r.beacon else (r.recent[0].withdrawal if r.recent else none) %}
+    {% if not w %}<p class="hint">Nothing on chain yet. Your deposit file's credentials are checked again on the launchpad before you send.</p>
+    {% else %}
+    <dl>
+      <dt>Type</dt><dd>{{ w.kind }}</dd>
+      <dt>Pays to</dt><dd>{% if w.address %}<code>{{ w.address }}</code>{% else %}—{% endif %}
+        {% if w.matches is true %}<span class="good">matches</span>{% elif w.matches is false %}<span class="bad">does NOT match</span>{% endif %}</dd>
+      <dt>Raw</dt><dd><code class="wrap">{{ w.raw }}</code></dd>
+    </dl>
+    {% if not r.beacon %}<p class="hint">From the pending deposit (not processed by the beacon chain yet).</p>{% endif %}
+    {% endif %}
+  </section>
+</div>
+
+<section class="card" id="deposits">
+  <h2>Recent deposits (deposit contract)</h2>
+  {% if r.recent_error is defined %}<p class="bad">Couldn't scan the deposit contract: {{ r.recent_error }}</p>
+  {% else %}
+  <p class="hint">Blocks {{ r.scanned[0] | num }} – {{ r.scanned[1] | num }}. Older deposits already show in the beacon state above.</p>
+  {% if not r.recent %}<p>None for this key.</p>
+  {% else %}
+  <ul class="history">
+    {% for d in r.recent %}
+    <li class="{{ 'fail' if d.withdrawal.matches is false else 'ok' }}"><span class="dot"></span><div>
+      <strong>{{ d.amount_pls | num }} PLS</strong> · block {{ d.block | num }} · deposit #{{ d.index | num }}<br>
+      <span class="hint">to {{ d.withdrawal.address or d.withdrawal.kind }}{% if d.withdrawal.matches is false %} — not your address{% endif %}</span>
+      {% if d.tx %}<br><a href="{{ CHAIN.explorer }}/tx/{{ d.tx }}" target="_blank" rel="noopener noreferrer">transaction</a>{% endif %}
+    </div></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% endif %}
+</section>
+{% endfor %}
+
+<section class="card">
+  <h2>Check another key</h2>
+  <form method="get" action="{{ url_for('validator_check') }}" class="row tight">
+    <input type="hidden" name="mode" value="{{ mode }}">
+    <input type="text" name="pubkey" value="{{ asked }}" placeholder="0x… (96 hex characters)" spellcheck="false" autocomplete="off" aria-label="Validator public key">
+    <button>Check</button>
+  </form>
+</section>
+{% endblock %}

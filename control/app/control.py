@@ -13,6 +13,7 @@ import re
 import secrets
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime, timezone
@@ -104,6 +105,30 @@ VALIDATOR_STATUS = {0: "Unknown", 1: "Deposited", 2: "Pending", 3: "Active", 4: 
 # Doppelganger protection waits 2-3 epochs (32 slots x 10 s) after each start.
 DOPPELGANGER_SECONDS = 3 * 32 * 10
 
+# On-chain key check (Validator card): the beacon state plus recent deposit-contract events.
+# Keys and the expected withdrawal address come from control/.env; both are public.
+DEPOSIT_CONTRACT = os.environ.get("CONTROL_DEPOSIT_CONTRACT", "0x3693693693693693693693693693693693693693")
+DEPOSIT_EVENT_TOPIC = "0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"  # DepositEvent(bytes,bytes,bytes,bytes,bytes)
+# The beacon state picks up a deposit only after the eth1 follow distance and a voting period
+# (up to about 12 h on PulseChain), so also scan the deposit contract over the last ~3.5 days.
+DEPOSIT_SCAN_BLOCKS = 30_000
+PUBKEY_RE = re.compile(r"0x[0-9a-f]{96}")
+ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]{40}")
+CHECK_PUBKEYS = [k for k in re.split(r"[\s,]+", os.environ.get("VALIDATOR_PUBKEYS", "").strip().lower()) if PUBKEY_RE.fullmatch(k)]
+CHECK_ADDRESS = os.environ.get("VALIDATOR_WITHDRAWAL_ADDRESS", "").strip()
+# Beacon API validator statuses, in words.
+BEACON_STATUS_TEXT = {
+    "pending_initialized": ("Pending", "Deposit processed; waiting to become eligible for activation."),
+    "pending_queued": ("Pending", "In the activation queue."),
+    "active_ongoing": ("Active", "Attesting normally."),
+    "active_exiting": ("Exiting", "A voluntary exit is in progress."),
+    "active_slashed": ("Slashed", "Slashed and being removed."),
+    "exited_unslashed": ("Exited", "Exited; waiting for the balance to become withdrawable."),
+    "exited_slashed": ("Exited (slashed)", "Exited after being slashed."),
+    "withdrawal_possible": ("Withdrawable", "The balance will be swept to the withdrawal address."),
+    "withdrawal_done": ("Withdrawn", "The balance has been swept to the withdrawal address."),
+}
+
 # Console: containers whose recent logs node-logs keeps in STATE_DIR/live.
 CONSOLE_LOGS = {"geth": ("go-pulse", "pulse-geth"), "beacon": ("Prysm", "pulse-beacon")}
 
@@ -194,7 +219,9 @@ def create_app(config=None):
     def inject():
         if "csrf" not in session:
             session["csrf"] = secrets.token_urlsafe(32)
-        return {"csrf": session["csrf"], "hostname": PUBLIC_HOSTNAME or request.host, "ACTIONS": ACTIONS, "REAUTH_ACTIONS": REAUTH_ACTIONS, "CHAIN": CHAIN}
+        return {"csrf": session["csrf"], "hostname": PUBLIC_HOSTNAME or request.host, "ACTIONS": ACTIONS,
+                "REAUTH_ACTIONS": REAUTH_ACTIONS, "CHAIN": CHAIN, "CHECK_PUBKEYS": CHECK_PUBKEYS,
+                "DEPOSIT_CONTRACT": DEPOSIT_CONTRACT}
 
     # --- routes ------------------------------------------------------------
     @app.get("/healthz")
@@ -267,6 +294,21 @@ def create_app(config=None):
         submit_request(name, ip)
         session["message"] = ("ok", f"{ACTIONS[name][0]}: started. This page updates as it runs.")
         return redirect(url_for("index"))
+
+    @app.get("/validator/check")
+    def validator_check():
+        mode = "status" if request.args.get("mode") == "status" else "deposits"
+        asked = request.args.get("pubkey", "").strip().lower()
+        if asked and not asked.startswith("0x"):
+            asked = "0x" + asked
+        if asked and not PUBKEY_RE.fullmatch(asked):
+            return render_template("validator_check.html", mode=mode, reports=[], asked=asked,
+                                   error="That isn't a validator public key (0x followed by 96 hex characters)."), 400
+        keys = [asked] if asked else CHECK_PUBKEYS
+        expected = CHECK_ADDRESS or (((collect_status().get("helper") or {}).get("validator") or {}).get("fee_recipient") or "")
+        reports = [chain_check(k, expected) for k in keys]
+        return render_template("validator_check.html", mode=mode, reports=reports, asked=asked,
+                               expected=expected, expected_from="control/.env" if CHECK_ADDRESS else "fee recipient")
 
     @app.get("/console")
     def console():
@@ -387,9 +429,127 @@ def _post_json(url, method):
         return json.load(r)["result"]
 
 
-def _get_json(url):
-    with urllib.request.urlopen(url, timeout=3) as r:
+def _get_json(url, timeout=3):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
         return json.load(r)
+
+
+def _rpc(method, params, timeout=15):
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+    req = urllib.request.Request(RPC_URL, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        reply = json.load(r)
+    if "error" in reply:
+        raise RuntimeError(reply["error"].get("message", "RPC error"))
+    return reply["result"]
+
+
+# --- on-chain key check --------------------------------------------------------
+
+def parse_deposit_log(data):
+    """Decode DepositEvent data: five ABI-encoded byte strings."""
+    raw = bytes.fromhex(data[2:] if data.startswith("0x") else data)
+
+    def field(i):
+        off = int.from_bytes(raw[32 * i:32 * i + 32], "big")
+        n = int.from_bytes(raw[off:off + 32], "big")
+        return raw[off + 32:off + 32 + n]
+
+    return {"pubkey": "0x" + field(0).hex(), "withdrawal_credentials": "0x" + field(1).hex(),
+            "amount_gwei": int.from_bytes(field(2), "little"), "index": int.from_bytes(field(4), "little")}
+
+
+def withdrawal_target(wc):
+    """(kind, address or None) for 0x-prefixed withdrawal credentials."""
+    wc = (wc or "").lower()
+    if len(wc) == 66 and wc.startswith("0x01") and wc[4:26] == "0" * 22:
+        return "0x01 (execution address)", "0x" + wc[26:]
+    if wc.startswith("0x00"):
+        return "0x00 (BLS key, no address yet)", None
+    return f"{wc[:4]} (unrecognised)", None
+
+
+def recent_deposits(pubkey):
+    """Deposit-contract events for this key in the last DEPOSIT_SCAN_BLOCKS blocks."""
+    head = _num(_rpc("eth_blockNumber", []))
+    start = max(0, head - DEPOSIT_SCAN_BLOCKS)
+    logs = _rpc("eth_getLogs", [{"address": DEPOSIT_CONTRACT, "topics": [DEPOSIT_EVENT_TOPIC],
+                                 "fromBlock": hex(start), "toBlock": hex(head)}])
+    found = []
+    for log in logs:
+        d = parse_deposit_log(log["data"])
+        if d["pubkey"] == pubkey:
+            d["block"] = _num(log["blockNumber"]); d["tx"] = log.get("transactionHash")
+            found.append(d)
+    return found, start, head
+
+
+def beacon_validator(pubkey):
+    """The validator's entry in the head beacon state, or None if the chain doesn't know the key."""
+    url = f"{BEACON_URL}/eth/v1/beacon/states/head/validators?id={pubkey}"
+    try:
+        data = _get_json(url, timeout=15).get("data") or []
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    return data[0] if data else None
+
+
+def chain_check(pubkey, expected=""):
+    """Everything the check page shows for one key, plus a verdict (level, headline, detail)."""
+    exp = expected.lower() if ADDRESS_RE.fullmatch(expected or "") else ""
+    r = {"pubkey": pubkey, "expected": expected if exp else ""}
+
+    def wc_info(wc):
+        kind, addr = withdrawal_target(wc)
+        return {"raw": wc, "kind": kind, "address": addr,
+                "matches": (addr == exp) if (exp and addr) else None}
+
+    try:
+        v = beacon_validator(pubkey)
+        if v:
+            val = v.get("validator") or {}
+            label, detail = BEACON_STATUS_TEXT.get(v.get("status"), (v.get("status") or "Unknown", ""))
+            r["beacon"] = {"index": v.get("index"), "status": v.get("status"), "label": label, "detail": detail,
+                           "balance_pls": _num(v.get("balance", 0)) / 1e9,
+                           "effective_pls": _num(val.get("effective_balance", 0)) / 1e9,
+                           "slashed": bool(val.get("slashed")),
+                           "eligibility_epoch": val.get("activation_eligibility_epoch"),
+                           "activation_epoch": val.get("activation_epoch"),
+                           "exit_epoch": val.get("exit_epoch"),
+                           "withdrawal": wc_info(val.get("withdrawal_credentials"))}
+        else:
+            r["beacon"] = None
+    except Exception as e:  # noqa: BLE001
+        r["beacon_error"] = str(e) or e.__class__.__name__
+    try:
+        found, start, head = recent_deposits(pubkey)
+        r["recent"] = [dict(d, withdrawal=wc_info(d["withdrawal_credentials"]), amount_pls=d["amount_gwei"] / 1e9)
+                       for d in found]
+        r["scanned"] = (start, head)
+    except Exception as e:  # noqa: BLE001
+        r["recent_error"] = str(e) or e.__class__.__name__
+
+    b, recent = r.get("beacon"), r.get("recent") or []
+    mismatched = [w for w in ([b["withdrawal"]] if b else []) + [d["withdrawal"] for d in recent] if w["matches"] is False]
+    if mismatched:
+        r["verdict"] = ("red", "Withdrawal credentials don't match your address",
+                        "A deposit for this key pays out somewhere else. Don't deposit; read the details below.")
+    elif b:
+        r["verdict"] = ("red" if b["slashed"] else "green", f"On chain: {b['label']}", b["detail"])
+    elif recent:
+        r["verdict"] = ("yellow", "Deposit seen, not processed yet",
+                        "The deposit contract has it; the beacon chain adds it after the eth1 follow distance "
+                        "(up to about 12 hours), then the key shows as Pending.")
+    elif "beacon_error" in r:
+        r["verdict"] = ("yellow", "Couldn't check the beacon state", r["beacon_error"])
+    elif "recent_error" in r:
+        r["verdict"] = ("yellow", "No deposit in the beacon state, but the recent-deposit scan failed", r["recent_error"])
+    else:
+        r["verdict"] = ("green", "No deposit for this key yet",
+                        "Neither the beacon state nor the last ~3.5 days of deposit-contract events know this key.")
+    return r
 
 
 def _num(v):
