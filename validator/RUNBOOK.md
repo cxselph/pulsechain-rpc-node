@@ -20,8 +20,8 @@ Only after the node has met its readiness bar, and the keys were generated **off
    - The client starts, and doppelganger protection waits 2–3 epochs.
    - Before the deposit, the log shows the key as unknown or waiting for a deposit, and the control page shows the status as Unknown. That's expected, and costs nothing.
    - Starting **before** the deposit proves the keys load and the settings are right, while nothing is at stake yet.
-6. **Deposit** on the PulseChain launchpad from the wallet holding the stake. Before you confirm, check that the withdrawal credentials start with `0x01` followed by your withdrawal address.
-7. **Watch the status** on the control page or the Validator dashboard: Deposited → Pending → Active. Activation can take hours to days, depending on the queue. Within two epochs of Active, "Last attestation" should stay under about 64 slots.
+6. **Deposit** on the PulseChain launchpad from the wallet holding the stake. First press **Check deposits** on the control page's Validator card: it must say "No deposit for this key yet" (anything else means someone may have front-run the key; stop). Before you confirm, check that the withdrawal credentials start with `0x01` followed by your withdrawal address.
+7. **Watch the status** on the control page (**Check status & withdrawal**) or the Validator dashboard: Deposited → Pending → Active. Activation can take hours to days, depending on the queue. Within two epochs of Active, "Last attestation" should stay under about 64 slots.
 8. **For the first week,** check the Validator dashboard daily. Target votes should be close to 100%, failed attestations near 0, and no alerts.
 
 ## 2. Restarts, reboots and updates
@@ -64,7 +64,7 @@ The order matters. Never start the new copy until the old one is provably stoppe
 
 An exit can't be undone, and the keys can never validate again. The whole balance is paid to the withdrawal address.
 
-1. On the beacon explorer, check that the withdrawal credentials are `0x01` followed by **your** withdrawal address.
+1. Check that the withdrawal credentials are `0x01` followed by **your** withdrawal address: control page → Validator card → **Check status & withdrawal** must say "matches".
 2. `sudo ./validator/exit.sh`. Type `exit for good`, then Prysm's own confirmation phrase. The exit is signed by the validator's signing key and sent to the local beacon.
 3. **Keep the validator running** until its status reads **Exited**. It still has duties until its exit epoch, and the exit queue can take a while.
 4. Then `sudo ./validator/disable.sh`.
