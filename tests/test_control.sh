@@ -25,6 +25,7 @@ if grep -q 'docker.sock' "${c}"; then fail "the control page must never get the 
 grep -q 'read_only: true' "${c}" && grep -q 'cap_drop: \[ALL\]' "${c}" && grep -q 'user: "10001:10001"' "${c}" && grep -q 'no-new-privileges:true' "${c}" \
   && pass "control page: read-only, no capabilities, uid 10001, no-new-privileges" || fail "control page container hardening missing"
 grep -q '/var/lib/node-control/state:/state:ro' "${c}" && pass "helper state mounted read-only" || fail "state must be read-only for the page"
+grep -q '/var/lib/node-control/host-report:/host-report:ro' "${c}" && pass "hypervisor report mounted read-only" || fail "host-report must be mounted read-only"
 if grep -qE 'ports:|0\.0\.0\.0' "${c}"; then fail "control page must not publish ports"; else pass "no published ports"; fi
 grep -q -- '"--bind", "127.0.0.1:8090"' "${CTL}/Dockerfile" && pass "gunicorn binds 127.0.0.1:8090" || fail "gunicorn must bind 127.0.0.1"
 grep -q 'reverse_proxy 127.0.0.1:8090' "${ROOT}/proxy/Caddyfile" && grep -q 'handle_errors 502 503' "${ROOT}/proxy/Caddyfile" \
@@ -61,6 +62,27 @@ else
   fail "status.sh output"
 fi
 rm -rf "${sv}"
+
+# --- Hypervisor report: the forced command only stores text ----------------------
+hr="$(mktemp -d)"
+printf 'old report\n' > "${hr}/report.txt"
+if printf '' | HOST_REPORT_DIR="${hr}" bash "${CTL}/host-report-receive.sh" >/dev/null 2>&1; then
+  fail "receiver accepted an empty report"
+else
+  grep -qx 'old report' "${hr}/report.txt" && pass "receiver keeps the previous report when sent nothing" || fail "receiver lost the previous report"
+fi
+printf '== Summary ==\n  \033[31m\342\234\227\033[0m bad\tthing\a\n' | HOST_REPORT_DIR="${hr}" bash "${CTL}/host-report-receive.sh" >/dev/null
+if [[ "$(cat "${hr}/report.txt")" == "$(printf '== Summary ==\n  [31m\342\234\227[0m bad\tthing')" ]] && [[ "$(stat -c %a "${hr}/report.txt" 2>/dev/null || stat -f %Lp "${hr}/report.txt")" == 644 ]]; then
+  pass "receiver strips control characters, keeps UTF-8 and tabs, file is 0644"
+else
+  od -c "${hr}/report.txt" >&2; fail "receiver output"
+fi
+head -c 300000 /dev/zero | tr '\0' 'a' | HOST_REPORT_DIR="${hr}" bash "${CTL}/host-report-receive.sh" >/dev/null
+[[ "$(wc -c < "${hr}/report.txt" | tr -d ' ')" -eq 262144 ]] && pass "receiver caps the report at 256 KiB" || fail "receiver size cap"
+[[ -z "$(find "${hr}" -name '.report.*')" ]] && pass "receiver leaves no temp files" || fail "receiver left temp files"
+rm -rf "${hr}"
+grep -q 'restrict,from="%s",command="%s"' "${CTL}/host-report-setup.sh" \
+  && pass "hypervisor key: restrict + from + forced command" || fail "host-report-setup.sh must install a restricted, forced-command key"
 
 # --- Python tests --------------------------------------------------------------------
 if (cd "${CTL}" && python3 -m unittest tests/test_node_control.py tests/test_node_logs.py >/dev/null 2>&1); then

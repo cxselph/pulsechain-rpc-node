@@ -164,6 +164,24 @@
 </section>
 {% endif %}
 
+{% set hr = s.get('host') %}
+{% if hr %}
+<section class="card" id="host">
+  <h2>Host (hypervisor)</h2>
+  <p class="big"><span class="{{ {'green': 'good', 'yellow': 'warn', 'red': 'bad'}[hr.level] }}">{{ {'green': 'All clear', 'yellow': 'Attention', 'red': 'Problem'}[hr.level] }}</span>
+    <span class="hint">· report {{ hr.at | ago }}</span></p>
+  <p>{{ hr.headline }}</p>
+  {% if hr.issues %}
+  <ul class="report-issues">
+    {% for kind, text in hr.issues[:8] %}<li class="{{ kind }}"><span class="mark">{{ '✗' if kind == 'bad' else '!' }}</span> {{ text }}</li>{% endfor %}
+  </ul>
+  {% if hr.issues | length > 8 %}<p class="hint">and {{ hr.issues | length - 8 }} more</p>{% endif %}
+  {% endif %}
+  {% for line in hr.header %}<p class="hint">{{ line }}</p>{% endfor %}
+  <p><a href="{{ url_for('host') }}">Full report</a> <span class="hint">· read-only; sent by the hypervisor every 15 min</span></p>
+</section>
+{% endif %}
+
 <section class="card">
   <h2>Actions</h2>
   <div class="actions">

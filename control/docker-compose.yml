@@ -30,6 +30,8 @@ services:
     volumes:
       - /var/lib/node-control/requests:/requests
       - /var/lib/node-control/state:/state:ro
+      # Health report the hypervisor pushes in (optional; ./control/host-report-setup.sh).
+      - /var/lib/node-control/host-report:/host-report:ro
       # Any directory on the chain disk, read-only, just for free-space numbers.
       - ${DATA_DIR:-/blockchain}/control:/chainfs:ro
     tmpfs:

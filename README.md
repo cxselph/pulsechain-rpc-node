@@ -303,6 +303,7 @@ A phone-friendly page, served through the HTTPS front end, that shows node healt
 - **Validator** (once `validator/` is set up): switched off, stopped, doppelganger wait or attesting; status, balance, slots since the last attestation, target votes over 24 h, slashing-protection refusals and the fee recipient (numbers from the monitoring stack). A switched-on validator that isn't running, one that's missing attestations, slashed or exiting, or slashing protection refusing to sign turns the banner red. Switching it on stays an SSH step (`sudo ./validator/enable.sh`).
 - **Validator key check** (`/validator/check`, the **Check deposits** and **Check status & withdrawal** buttons on the Validator card, also while it's switched off): read-only. It asks the local beacon state for the key (status such as Pending or Active, index, balance, activation epochs) and scans the deposit contract (`0x3693…3693`) for the last ~3.5 days, because a new deposit reaches the beacon state only after up to about 12 hours. It decodes the withdrawal credentials and compares them with your address. Before a deposit, the answer you want is "No deposit for this key yet". A deposit for your key that pays anywhere else turns the page red. Set `VALIDATOR_PUBKEYS` (from `deposit_data-*.json`) and optionally `VALIDATOR_WITHDRAWAL_ADDRESS` in `control/.env`. Without the address it compares with the fee recipient. Any key can also be pasted on the page.
 - **Console** (`/console`): the last 500 lines of go-pulse and Prysm logs, updating every 3 s, with the sync numbers on top, a "sync lines only" filter, pause, and warnings/errors coloured. It's read-only. A separate `node-control-logs` service follows `docker logs` as the repo owner and keeps those lines in `/var/lib/node-control/state/live/`, so the page still has no Docker access.
+- **Host card** (optional, `/host` for the full report): a read-only health report from the hypervisor this VM runs on (drives, UPS, guests, storage, backups, host updates), so you can see it away from home. See **Hypervisor report** below.
 - **Actions** (each behind a confirm screen, one at a time, all logged with output):
   - Check for updates
   - Apply update
@@ -316,6 +317,16 @@ A phone-friendly page, served through the HTTPS front end, that shows node healt
 - **Prysm stuck at 0 peers.** If Prysm has been up for 10 minutes and had 0 peers for 10 minutes while go-pulse has peers (so the network itself works), it restarts Prysm (with its normal 5-minute clean shutdown), at most once an hour.
 
 It skips a turn while an action is running, and leaves a node that was stopped on purpose alone. Whatever it does shows under **Recent actions** on the page (and in `./control/status.sh`) as "Watchdog", with a log.
+
+**Hypervisor report (optional).** If the VM runs on a host you manage (for example Proxmox), the host can push a text health report here, and the page shows it on a **Host** card: a green / yellow / red summary, the issues, and a **Full report** page. It only goes one way. The host gets an SSH key that can do exactly one thing on this VM: store what it sends as `/var/lib/node-control/host-report/report.txt`. The key is limited with `restrict`, `from="<host IP>"` and a forced command ([`control/host-report-receive.sh`](control/host-report-receive.sh), which caps the size and strips control characters). It logs in to a separate `host-report` account that has no password. This VM gets no access to the host, so a compromised node can't reach the hypervisor. The page mounts the report read-only and shows it as escaped text. The card turns yellow once no report has arrived for 35 minutes (`CONTROL_HOST_REPORT_STALE_MIN`). It's a snapshot, so live views (such as watching the UPS) still need an SSH login on the host.
+
+```bash
+# on this VM, once (the key is the host's report public key):
+sudo ./control/host-report-setup.sh --from <host IP> 'ssh-ed25519 AAAA… <comment>'
+sudo ./control/host-report-setup.sh --remove     # undo
+```
+
+The host side sends any text in this format: a few header lines (optionally `generated <ISO time>`), then sections that start with `== Title ==`. Check lines are `  ✓ …`, `  ! …` or `  ✗ …`, and a `== Summary ==` section lists the issues. A typical setup is a systemd timer on the host that runs its checks every 15 minutes and pipes the output to `ssh -i <key> host-report@<this VM>`.
 
 **How it stays safe.** The page runs in a container with no Docker socket, a read-only filesystem, no capabilities, and no access to the repo. Pressing a button only drops a small request file in `/var/lib/node-control/requests`. Only the page's user can write there, and only the repo owner can read it. A systemd path unit then runs [`control/node-control.py`](control/node-control.py) **as the repo owner (not root)**. It accepts only the eight actions above and rejects anything else.
 

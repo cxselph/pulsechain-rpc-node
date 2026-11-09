@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Host report{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Host (hypervisor) report</h1>
+  {% if not r %}
+  <p>No report has arrived yet.</p>
+  <p class="hint">The hypervisor pushes a read-only health report here over SSH with a key that can only store it.
+    Set it up with <code>sudo ./control/host-report-setup.sh --from &lt;hypervisor IP&gt; '&lt;its public key&gt;'</code>
+    on this VM; see the README.</p>
+  {% else %}
+  <div class="banner {{ r.level }}">
+    <strong>{{ {'green': 'All clear', 'yellow': 'Attention', 'red': 'Problem'}[r.level] }}</strong>
+    <span>{{ r.headline }}</span>
+  </div>
+  <p class="hint">Generated {{ r.at[:19] | replace('T', ' ') }} UTC ({{ r.at | ago }}).
+    {% for line in r.header %}<br>{{ line }}{% endfor %}</p>
+  <p class="hint">A snapshot, not live: live views such as the UPS watch need an SSH login on the hypervisor.</p>
+  {% endif %}
+  <p><a href="{{ url_for('index') }}">← Back</a></p>
+</section>
+{% if r %}
+{% for sec in r.sections %}
+<section class="card">
+  <h2>{{ sec.title }}</h2>
+  <pre class="report">{% for kind, text in sec.lines %}{% if kind == 'info' %}<span>{{ text }}</span>
+{% else %}<span class="{{ kind }}">  <span class="mark">{{ {'ok': '✓', 'warn': '!', 'bad': '✗'}[kind] }}</span> {{ text }}</span>
+{% endif %}{% endfor %}</pre>
+</section>
+{% endfor %}
+{% endif %}
+{% endblock %}

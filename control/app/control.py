@@ -38,6 +38,9 @@ RPC_URL = os.environ.get("CONTROL_RPC_URL", "http://127.0.0.1:8545")
 BEACON_URL = os.environ.get("CONTROL_BEACON_URL", "http://127.0.0.1:3500")
 PROM_URL = os.environ.get("CONTROL_PROMETHEUS_URL", "http://127.0.0.1:9090")
 PUBLIC_HOSTNAME = os.environ.get("PUBLIC_HOSTNAME", "")
+# Read-only health report the hypervisor pushes in (control/host-report-setup.sh). Optional.
+HOST_REPORT = os.environ.get("CONTROL_HOST_REPORT", "/host-report/report.txt")
+HOST_REPORT_STALE = int(os.environ.get("CONTROL_HOST_REPORT_STALE_MIN", "35")) * 60
 
 # Same list node-control accepts. Descriptions are shown on the confirm screen.
 ACTIONS = {
@@ -310,6 +313,10 @@ def create_app(config=None):
         return render_template("validator_check.html", mode=mode, reports=reports, asked=asked,
                                expected=expected, expected_from="control/.env" if CHECK_ADDRESS else "fee recipient")
 
+    @app.get("/host")
+    def host():
+        return render_template("host.html", r=host_report(full=True))
+
     @app.get("/console")
     def console():
         return render_template("console.html", logs=CONSOLE_LOGS)
@@ -338,6 +345,85 @@ def create_app(config=None):
         return render_template("log.html", text=text, entry=entry)
 
     return app
+
+
+# --- hypervisor report ---------------------------------------------------------
+
+_REPORT_LINE = re.compile(r"^  ([✓!✗]) (.*)$")
+_REPORT_KIND = {"✓": "ok", "!": "warn", "✗": "bad"}
+
+
+def parse_host_report(text):
+    """Split a pve-menu report into header lines and sections of (kind, text) lines.
+
+    Check lines look like "  ✓ text" / "  ! text" / "  ✗ text"; anything else is info.
+    The "Summary" section holds the issues of the whole run.
+    """
+    header, sections, cur = [], [], None
+    for line in text.splitlines():
+        m = re.match(r"^== (.+?) ==$", line.strip())
+        if m:
+            cur = {"title": m.group(1), "lines": []}
+            sections.append(cur)
+            continue
+        if cur is None:
+            if line.strip():
+                header.append(line.strip())
+            continue
+        c = _REPORT_LINE.match(line)
+        cur["lines"].append((_REPORT_KIND[c.group(1)], c.group(2)) if c else ("info", line))
+    for sec in sections:  # no trailing blank lines
+        while sec["lines"] and sec["lines"][-1] == ("info", ""):
+            sec["lines"].pop()
+    summary = next((sec for sec in sections if sec["title"] == "Summary"), None)
+    issues = [ln for ln in (summary["lines"] if summary else []) if ln[0] in ("warn", "bad")]
+    return header, sections, issues, summary is not None
+
+
+def host_report(full=False):
+    """The hypervisor's last report for the Host card, or None if none has arrived."""
+    try:
+        with open(HOST_REPORT, encoding="utf-8", errors="replace") as fh:
+            text = fh.read(262144)
+        received = os.path.getmtime(HOST_REPORT)
+    except OSError:
+        return None
+    header, sections, issues, complete = parse_host_report(text)
+    generated = None
+    for line in header:
+        if line.startswith("generated "):
+            try:
+                generated = datetime.fromisoformat(line.split(" ", 1)[1]).timestamp()
+            except ValueError:
+                pass
+    at = min(t for t in (generated, received) if t is not None)
+    age = max(0, int(time.time() - at))
+    r = {"at": datetime.fromtimestamp(at, timezone.utc).isoformat(timespec="seconds"), "age": age,
+         "stale": age > HOST_REPORT_STALE,
+         "header": [h for h in header if not h.startswith(("#", "generated "))],
+         "issues": issues, "bad": sum(1 for k, _ in issues if k == "bad"),
+         "warn": sum(1 for k, _ in issues if k == "warn")}
+    if not complete:
+        r["level"], r["headline"] = "yellow", "Report incomplete (no summary)"
+    elif r["bad"]:
+        r["level"], r["headline"] = "red", f"{r['bad']} problem{'s' if r['bad'] != 1 else ''}"
+    elif r["warn"]:
+        r["level"], r["headline"] = "yellow", f"{r['warn']} to look at"
+    else:
+        r["level"], r["headline"] = "green", "Everything checked looks fine"
+    if r["stale"]:
+        r["level"] = "red" if r["level"] == "red" else "yellow"
+        r["headline"] = f"No report for {fmt_age(age)}: the hypervisor may be down or not sending. Last: " + r["headline"].lower()
+    if full:
+        r["sections"] = sections
+    return r
+
+
+def fmt_age(secs):
+    for size, unit in ((86400, "d"), (3600, "h"), (60, "min")):
+        if secs >= size:
+            return f"{secs // size} {unit}"
+    return f"{secs} s"
 
 
 # --- status --------------------------------------------------------------------
@@ -687,6 +773,7 @@ def collect_status():
     s["history"] = read_history(8)
     s["readiness"] = readiness()
     s["validator"] = validator_state(s)
+    s["host"] = host_report()
     s["health"] = health(s)
     with _cache_lock:
         _cache.update(at=time.time(), data=s)
