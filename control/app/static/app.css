@@ -80,3 +80,14 @@ pre.console .err { color: #ff6b6b; }
 code.wrap { word-break: break-all; }
 #validator-checks { margin-top: 12px; }
 form.row.tight input[type=text] { flex: 1 1 320px; margin: 0; }
+.warn { color: var(--warn); }
+pre.report { max-height: none; font-size: 0.8rem; line-height: 1.4; }
+pre.report .ok .mark { color: var(--good); }
+pre.report .warn, pre.report .warn .mark { color: var(--warn); }
+pre.report .bad, pre.report .bad .mark { color: var(--bad); }
+pre.report .mark { font-weight: 700; }
+.report-issues { list-style: none; padding: 0; margin: 0 0 10px; }
+.report-issues li { padding: 2px 0; }
+.report-issues .mark { font-weight: 700; display: inline-block; width: 1.1em; }
+.report-issues .warn .mark { color: var(--warn); } .report-issues .bad .mark { color: var(--bad); }
+.report-issues li.warn, .report-issues li.bad { color: var(--fg); }

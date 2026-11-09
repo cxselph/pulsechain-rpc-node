@@ -5,7 +5,9 @@ import re
 import stat
 import sys
 import tempfile
+import time
 import unittest
+from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "app"))
@@ -56,6 +58,8 @@ class AppTest(unittest.TestCase):
         self.state = os.path.join(self.tmp, "state"); os.makedirs(os.path.join(self.state, "logs"))
         self.req = os.path.join(self.tmp, "requests"); os.makedirs(self.req)
         control.STATE_DIR, control.REQ_DIR = self.state, self.req
+        self._orig_report = control.HOST_REPORT
+        control.HOST_REPORT = os.path.join(self.tmp, "no-report.txt")
         self.status = fake_status()
         self._orig = control.collect_status
         self._orig_vm = control.validator_metrics
@@ -69,6 +73,7 @@ class AppTest(unittest.TestCase):
     def tearDown(self):
         control.collect_status = self._orig
         control.validator_metrics = self._orig_vm
+        control.HOST_REPORT = self._orig_report
 
     def csrf(self, path="/login"):
         html = self.c.get(path, base_url=BASE).get_data(as_text=True)
@@ -575,6 +580,73 @@ class AppTest(unittest.TestCase):
         self.login()
         html = self.c.get("/fragment/status", base_url=BASE).get_data(as_text=True)
         self.assertIn("Downloading blocks", html); self.assertIn("100 of 200", html); self.assertIn("50.0%", html)
+
+    # --- host (hypervisor) report --------------------------------------------------
+    REPORT = """#pve-host-report 1
+generated {gen}
+pve · up 3 days · guests 3/3 running · UPS OL 100% 73 min
+last drive check: 2026-11-06, 3 days ago
+
+== Host ==
+    pve-manager/9.2.26 · kernel 7.0.14-28-pve
+  ✓ running the newest installed kernel
+  ! 4 package updates pending (apt list --upgradable)
+
+== Guests ==
+  ✓ 100 plex running
+  ✗ 101 rpc: status: stopped
+  ✓ <b>not html</b>
+
+== Summary ==
+  ! 4 package updates pending (apt list --upgradable)
+  ✗ 101 rpc: status: stopped
+
+== Before a host reboot or shutdown ==
+    1. Plex: check the DVR schedule.
+"""
+
+    def write_report(self, text, age=60):
+        path = os.path.join(self.tmp, "report.txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        t = time.time() - age
+        os.utime(path, (t, t))
+        control.HOST_REPORT = path
+        return path
+
+    def test_host_report_parse_and_card(self):
+        gen = datetime.fromtimestamp(time.time() - 120).astimezone().isoformat(timespec="seconds")
+        self.write_report(self.REPORT.format(gen=gen), age=60)
+        r = control.host_report()
+        self.assertEqual((r["level"], r["bad"], r["warn"]), ("red", 1, 1))
+        self.assertFalse(r["stale"]); self.assertGreaterEqual(r["age"], 115)  # generated time wins over the file time
+        self.assertEqual(r["header"][0], "pve · up 3 days · guests 3/3 running · UPS OL 100% 73 min")
+        self.status["host"] = r
+        self.login()
+        html = self.c.get("/fragment/status", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Host (hypervisor)", html); self.assertIn("1 problem", html)
+        self.assertIn("101 rpc: status: stopped", html); self.assertIn('href="/host"', html)
+        page = self.c.get("/host", base_url=BASE).get_data(as_text=True)
+        self.assertIn("Before a host reboot or shutdown", page); self.assertIn("pve-manager/9.2.26", page)
+        self.assertIn("&lt;b&gt;not html&lt;/b&gt;", page); self.assertNotIn("<b>not html</b>", page)
+
+    def test_host_report_clean_stale_missing(self):
+        self.write_report("pve\n\n== Summary ==\n  ✓ everything checked looks fine\n", age=10)  # no generated line
+        self.assertEqual(control.host_report()["level"], "green")
+        self.write_report("x\n\n== Summary ==\n  ✓ everything checked looks fine\n", age=control.HOST_REPORT_STALE + 60)
+        r = control.host_report()
+        self.assertTrue(r["stale"]); self.assertEqual(r["level"], "yellow"); self.assertIn("No report for", r["headline"])
+        self.write_report("cut off mid-run\n== Host ==\n  ✓ fine\n", age=10)
+        self.assertEqual(control.host_report()["headline"], "Report incomplete (no summary)")
+        control.HOST_REPORT = os.path.join(self.tmp, "missing.txt")
+        self.assertIsNone(control.host_report())
+        self.login()
+        self.assertNotIn("Host (hypervisor)", self.c.get("/fragment/status", base_url=BASE).get_data(as_text=True))
+        self.assertIn("No report has arrived yet", self.c.get("/host", base_url=BASE).get_data(as_text=True))
+
+    def test_host_page_requires_login(self):
+        r = self.c.get("/host", base_url=BASE)
+        self.assertEqual(r.status_code, 302); self.assertIn("/login", r.location)
 
     # --- health -----------------------------------------------------------------
     def test_health_levels(self):
