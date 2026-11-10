@@ -146,6 +146,11 @@ grep -q 'RECEIVER="${LIB_DIR}/cert-push-receive"' "${PROXY}/cert-push-setup.sh" 
   && grep -qF "printf 'restrict,from=\"%s\",command=\"sudo -n %s\" %s %s cert-push" "${PROXY}/cert-push-setup.sh" \
   && grep -qF 'NOPASSWD: %s' "${PROXY}/cert-push-setup.sh" && pass "setup forces the receiver, restricted, from one address" || fail "setup's key line"
 
+# --- A hostname change reaches the control page (its Flask TRUSTED_HOSTS) ------------
+grep -q 'upsert_dotenv "${ctl_env}" PUBLIC_HOSTNAME "${host}"' "${PROXY}/install.sh" \
+  && grep -q 'control/restart.sh' "${PROXY}/install.sh" \
+  && pass "install.sh moves the control page to the new hostname" || fail "install.sh should update control/.env PUBLIC_HOSTNAME"
+
 # --- Caddyfile parses (caddy validate, pinned image, throwaway cert) --------------
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   if docker run --rm -e PUBLIC_HOSTNAME=rpc.home -e HTTP_PORT=8545 -e WS_PORT=8546 \

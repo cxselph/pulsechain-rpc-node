@@ -108,6 +108,20 @@ if [[ -f "${mon_env}" ]]; then
   ok "Grafana now lives at https://${host}/grafana/ (the SSH tunnel is no longer needed)"
 fi
 
+# --- 5b. Control page: it only answers its own hostname (Flask TRUSTED_HOSTS) ---
+ctl_env="${PROXY_DIR}/../control/.env"
+if [[ -f "${ctl_env}" ]]; then
+  ctl_host="$(grep -E '^PUBLIC_HOSTNAME=' "${ctl_env}" | tail -n 1 | cut -d= -f2- || true)"
+  if [[ "${ctl_host}" != "${host}" ]]; then
+    upsert_dotenv "${ctl_env}" PUBLIC_HOSTNAME "${host}"
+    if container_running pulse-control; then
+      info "Restarting the control page for https://${host}/ ..."
+      "${PROXY_DIR}/../control/restart.sh" >/dev/null
+    fi
+    ok "Control page now answers https://${host}/ (was ${ctl_host:-unset})"
+  fi
+fi
+
 # --- 6. Check every route -----------------------------------------------------
 echo ""
 info "Checking every route through 127.0.0.1 ..."
