@@ -270,7 +270,7 @@ One hostname for everything, served by Caddy on the node host:
 | anything else in a browser | a small landing page with the wallet settings |
 | `http://<host>` | redirects to https |
 
-You need a DNS record for the hostname pointing at the node (router / local DNS), and a certificate for **exactly** that name from a CA your devices trust. For a local-only name like `rpc.home`, that's your own private CA. Public CAs can't issue for it.
+You need a DNS record for the hostname pointing at the node (router / local DNS, or a public record for a private address), and a certificate for that name from a CA your devices trust: one issued for exactly the name, or a wildcard for its parent (`*.home.example.com` covers `rpc.home.example.com`, not deeper names). For a local-only name like `rpc.home`, that's your own private CA. For a name under a domain you own, a public CA (Let's Encrypt with a DNS challenge) can issue it, and then no device needs a private CA.
 
 ```bash
 # copy cert + key to the node first (e.g. scp cert.pem key.pem user@node:~/)
@@ -288,6 +288,19 @@ What the installer does:
 - **Tests every route.**
 
 To renew the certificate, run `./proxy/install.sh --cert new.pem --key new-key.pem`.
+
+### Renewals pushed from another machine (optional)
+
+A Let's Encrypt certificate lasts 90 days or less, so copying it by hand doesn't scale. If another machine renews it (here: the NAS's certs container, which proves the domain through its DNS), it can push each renewal to the node over SSH:
+
+```bash
+sudo ./proxy/cert-push-setup.sh --from <pusher IP> --host rpc.home.example.com '<the pusher's ssh-ed25519 public key>'
+```
+
+- The pusher's key logs in as a dedicated `certpush` account and can do exactly one thing: run `cert-push-receive.sh` as root (forced command; one sudo rule for that file; no shell, no forwarding; only from `--from`). It reads the certificate chain and key on stdin, refuses anything over 64 KiB, that doesn't parse, whose key doesn't match, that doesn't cover `--host`, or that has expired, installs it to `/etc/pulse-proxy/tls`, restarts Caddy and checks Caddy serves it. If it doesn't, the previous pair goes back.
+- What runs as root is a root-owned copy in `/usr/local/lib/pulse-proxy`, not the files in this checkout, so editing the repo can't change it; re-run the setup after an update that changes `proxy/cert-push-receive.sh` or `proxy/cert_check.sh`.
+- Moving to a new hostname: the first certificate for `--host` is installed but Caddy isn't restarted while it still serves the old name. Then run `./proxy/install.sh --host <new host>` (it checks the installed certificate, switches Caddy, Grafana and the route checks) and `./tailscale/install.sh` (so tailnet DNS answers the new name).
+- `sudo ./proxy/cert-push-setup.sh --remove` takes the account, key and sudo rule away; the installed certificate stays.
 
 There's no HSTS header on purpose. With a private CA it would lock out any device that doesn't trust the CA yet. Don't port-forward 443 or 80 on the router: this stays a private endpoint.
 

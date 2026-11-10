@@ -90,6 +90,62 @@ else
   echo "SKIP: expired-certificate case (this openssl lacks -not_after)"
 fi
 
+# --- Wildcard certificates (cert_check.sh covers_host) ------------------------------
+(
+  cd "${tmp}"
+  openssl req -newkey rsa:2048 -nodes -keyout wild.key -out wild.csr -subj "/CN=*.home.example" >/dev/null 2>&1
+  printf 'subjectAltName=DNS:*.home.example\n' > ext.cnf
+  openssl x509 -req -in wild.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out wild.crt -days 2 -extfile ext.cnf >/dev/null 2>&1
+)
+out="$(cert_problems "${tmp}/wild.crt" "${tmp}/wild.key" rpc.home.example)"
+[[ -z "${out}" ]] && pass "wildcard *.home.example accepted for rpc.home.example" || fail "wildcard rejected: ${out}"
+out="$(cert_problems "${tmp}/wild.crt" "${tmp}/wild.key" a.rpc.home.example)"
+[[ "${out}" == *"not issued for"* ]] && pass "wildcard doesn't cover a deeper name" || fail "wildcard accepted for a.rpc.home.example"
+out="$(cert_problems "${tmp}/wild.crt" "${tmp}/wild.key" home.example)"
+[[ "${out}" == *"not issued for"* ]] && pass "wildcard doesn't cover its own parent" || fail "wildcard accepted for home.example"
+out="$(cert_problems "${tmp}/wild.crt" "${tmp}/wild.key" rpc.home.example.evil)"
+[[ "${out}" == *"not issued for"* ]] && pass "wildcard doesn't cover a look-alike" || fail "wildcard accepted for rpc.home.example.evil"
+
+# --- Certificate receiver (cert-push-receive.sh), with a stand-in docker ----------
+rx="${tmp}/rx"; mkdir -p "${rx}/tls"
+printf 'rpc.home.example\n' > "${rx}/push-host"
+printf 'PUBLIC_HOSTNAME=rpc.home\n' > "${rx}/proxy.env"
+printf '#!/bin/sh\necho "$*" >> "%s/docker-calls"\n' "${rx}" > "${rx}/docker"; chmod +x "${rx}/docker"
+receive() {  # receive <file to send>: run the receiver as the forced command would, with test paths
+  PULSE_TLS_DIR="${rx}/tls" PULSE_PUSH_HOST_FILE="${rx}/push-host" PULSE_PROXY_ENV_FILE="${rx}/proxy.env" \
+    PULSE_DOCKER="${rx}/docker" PULSE_SERVED_CHECK_TRIES=1 bash "${PROXY}/cert-push-receive.sh" < "$1" 2>&1 || true
+}
+cat "${tmp}/wild.crt" "${tmp}/ca.crt" "${tmp}/wild.key" > "${rx}/bundle.pem"
+out="$(receive "${rx}/bundle.pem")"
+[[ "${out}" == *"result=installed, waiting"*"--host rpc.home.example"* ]] && pass "receiver installs and waits while Caddy serves another name" || fail "receiver (before switch): ${out}"
+[[ "$(openssl x509 -in "${rx}/tls/cert.pem" -noout -subject)" == *"*.home.example"* ]] && pass "receiver wrote the certificate" || fail "receiver didn't write the certificate"
+[[ "$(grep -c BEGIN "${rx}/tls/cert.pem")" -eq 2 ]] && pass "receiver kept the whole chain" || fail "receiver dropped the chain"
+[[ "$(stat -c %a "${rx}/tls/key.pem" 2>/dev/null || stat -f %Lp "${rx}/tls/key.pem")" == "600" ]] && pass "key is 0600" || fail "key permissions"
+[[ ! -e "${rx}/docker-calls" ]] && pass "no Caddy restart before the switch" || fail "Caddy restarted before the switch"
+out="$(receive "${rx}/bundle.pem")"
+[[ "${out}" == *"result=unchanged"* ]] && pass "same certificate again changes nothing" || fail "resend: ${out}"
+printf 'PUBLIC_HOSTNAME=rpc.home.example\n' > "${rx}/proxy.env"
+rm -f "${rx}/tls/cert.pem"   # so it's new again
+out="$(receive "${rx}/bundle.pem")"
+grep -q "restart -t 10 pulse-caddy" "${rx}/docker-calls" 2>/dev/null && pass "Caddy restarted once it serves the name" || fail "no restart after the switch: ${out}"
+[[ "${out}" == *"result=refused"*"previous one is back"* || "${out}" == *"no previous one"* || "${out}" == *"result=installed and served"* ]] \
+  && pass "receiver checks what Caddy serves after the restart" || fail "after restart: ${out}"
+cat "${tmp}/other.home.crt" "${tmp}/other.home.key" > "${rx}/wrong.pem"
+out="$(receive "${rx}/wrong.pem")"
+[[ "${out}" == *"result=refused"*"not issued for rpc.home.example"* ]] && pass "receiver refuses a certificate for another name" || fail "wrong name: ${out}"
+cat "${tmp}/wild.crt" "${tmp}/other.home.key" > "${rx}/mismatch.pem"
+out="$(receive "${rx}/mismatch.pem")"
+[[ "${out}" == *"result=refused"*"does not belong"* ]] && pass "receiver refuses a key that isn't the certificate's" || fail "mismatch: ${out}"
+cat "${tmp}/wild.crt" > "${rx}/nokey.pem"
+out="$(receive "${rx}/nokey.pem")"
+[[ "${out}" == *"result=refused: no private key"* ]] && pass "receiver refuses a bundle with no key" || fail "no key: ${out}"
+head -c 70000 /dev/zero > "${rx}/big.pem"
+out="$(receive "${rx}/big.pem")"
+[[ "${out}" == *"result=refused: more than"* ]] && pass "receiver refuses more than 64 KiB" || fail "big: ${out}"
+grep -q 'RECEIVER="${LIB_DIR}/cert-push-receive"' "${PROXY}/cert-push-setup.sh" \
+  && grep -qF "printf 'restrict,from=\"%s\",command=\"sudo -n %s\" %s %s cert-push" "${PROXY}/cert-push-setup.sh" \
+  && grep -qF 'NOPASSWD: %s' "${PROXY}/cert-push-setup.sh" && pass "setup forces the receiver, restricted, from one address" || fail "setup's key line"
+
 # --- Caddyfile parses (caddy validate, pinned image, throwaway cert) --------------
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   if docker run --rm -e PUBLIC_HOSTNAME=rpc.home -e HTTP_PORT=8545 -e WS_PORT=8546 \
