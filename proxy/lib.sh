@@ -26,29 +26,9 @@ proxy_hostname() {
   _trim "${line}"
 }
 
-# cert_problems <cert> <key> <hostname>: prints one line per problem, nothing if the
-# pair is usable (parses, matches, covers the hostname, not expired).
-cert_problems() {
-  local cert="$1" key="$2" host="$3" sans
-  if ! openssl x509 -in "${cert}" -noout 2>/dev/null; then
-    echo "certificate ${cert} is not a PEM certificate"
-    return 0
-  fi
-  if ! openssl pkey -in "${key}" -noout 2>/dev/null; then
-    echo "key ${key} is not a PEM private key"
-    return 0
-  fi
-  if [[ "$(openssl x509 -in "${cert}" -noout -pubkey)" != "$(openssl pkey -in "${key}" -pubout)" ]]; then
-    echo "the key does not belong to the certificate"
-  fi
-  sans="$(openssl x509 -in "${cert}" -noout -ext subjectAltName 2>/dev/null | tr ',' '\n' | sed 's/^[[:space:]]*//')"
-  if ! grep -qxF "DNS:${host}" <<<"${sans}"; then
-    echo "the certificate is not issued for ${host} (it covers: $(tr '\n' ' ' <<<"${sans}" | sed 's/X509v3 Subject Alternative Name: *//'))"
-  fi
-  if ! openssl x509 -in "${cert}" -noout -checkend 0 >/dev/null 2>&1; then
-    echo "the certificate has expired ($(openssl x509 -in "${cert}" -noout -enddate | cut -d= -f2))"
-  fi
-}
+# cert_problems: in cert_check.sh, which the certificate receiver (cert-push-receive.sh) also uses.
+# shellcheck source=cert_check.sh
+source "${PROXY_DIR}/cert_check.sh"
 
 # proxy_checks <hostname>: exercise every route through 127.0.0.1:443 and print
 # one "ok|FAIL|skip <what>" line each. Returns 1 if anything failed.
