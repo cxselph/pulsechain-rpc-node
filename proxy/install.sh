@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh — set up the HTTPS front end (Caddy) for https://<host>
 #
-#   ./proxy/install.sh --host rpc.home --cert ~/cert.pem --key ~/key.pem   # first time
+#   ./proxy/install.sh --host rpc.home.example.com --cert ~/cert.pem --key ~/key.pem   # first time
 #   ./proxy/install.sh --cert new-cert.pem --key new-key.pem              # renew the certificate
 #   ./proxy/install.sh                                                     # re-apply (keeps the installed certificate)
 #
@@ -46,11 +46,11 @@ command -v curl >/dev/null 2>&1 || die "curl is required."
 [[ -f "${PROXY_ENV}" ]] || { cp "${PROXY_DIR}/.env.example" "${PROXY_ENV}"; ok "Created proxy/.env"; }
 if [[ -n "${new_host}" ]]; then
   [[ "${new_host}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] \
-    || die "--host '${new_host}' is not a hostname like rpc.home"
+    || die "--host '${new_host}' is not a hostname like rpc.home.example.com"
   upsert_dotenv "${PROXY_ENV}" PUBLIC_HOSTNAME "${new_host}"
 fi
 host="$(proxy_hostname)"
-[[ -n "${host}" ]] || die "No hostname yet. Run: ./proxy/install.sh --host rpc.home --cert <cert.pem> --key <key.pem>"
+[[ -n "${host}" ]] || die "No hostname yet. Run: ./proxy/install.sh --host rpc.home.example.com --cert <cert.pem> --key <key.pem>"
 ok "Hostname: ${host}"
 
 # --- 2. Certificate -----------------------------------------------------------

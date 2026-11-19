@@ -274,7 +274,7 @@ You need a DNS record for the hostname pointing at the node (router / local DNS,
 
 ```bash
 # copy cert + key to the node first (e.g. scp cert.pem key.pem user@node:~/)
-./proxy/install.sh --host rpc.home --cert ~/cert.pem --key ~/key.pem
+./proxy/install.sh --host rpc.home.example.com --cert ~/cert.pem --key ~/key.pem
 rm ~/key.pem                    # the installer keeps its own root-only copy
 ./proxy/status.sh               # certificate, firewall, and a live check of every route
 ```
