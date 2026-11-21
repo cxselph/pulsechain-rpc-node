@@ -63,7 +63,15 @@ li.fail .dot { background: var(--bad); }
 .update { margin: 12px 0 4px; }
 .foot { text-align: center; }
 @media (max-width: 520px) { main { padding: 12px; } .top { padding: 10px 12px; } .brand span { display: none; } }
-dl.copylist dd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+dl.copylist dd { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* Long values (URLs) wrap inside the card instead of running off a phone screen. */
+dl.copylist code { min-width: 0; overflow-wrap: anywhere; }
+dl.copylist button.copy { flex: none; }
+/* Phones: label above its value, so the value gets the full card width. */
+@media (max-width: 520px) {
+  dl.copylist { grid-template-columns: 1fr; gap: 2px; }
+  dl.copylist dd { justify-content: space-between; margin-bottom: 10px; }
+}
 button.copy { padding: 3px 10px; font-size: 0.85rem; border-radius: 8px; }
 .console-head { margin-bottom: 10px; }
 .console-sync { margin: 0 0 10px; font-weight: 600; }

@@ -22,6 +22,6 @@
       data-rpc="{{ rpc }}" data-symbol="{{ CHAIN.symbol }}" data-decimals="{{ CHAIN.decimals }}"
       data-explorer="{{ CHAIN.explorer }}">Add to MetaMask</button>
     <span class="hint" id="wallet-msg"></span></p>
-  <p class="hint">Works at home and, with Tailscale on, anywhere. Phones and computers must trust the .home certificate authority.</p>
+  <p class="hint">Works at home and, with Tailscale on, anywhere. Phones and computers must trust the node's certificate: nothing to install if it's from a public CA like Let's Encrypt, otherwise install your own CA on each device first.</p>
 </section>
 {% endblock %}
