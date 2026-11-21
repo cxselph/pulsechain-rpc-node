@@ -54,6 +54,8 @@ grep -qE '^\s+admin off$' "${caddyfile}" && pass "Caddy admin API off" || fail "
 if grep -qi 'strict-transport-security' "${caddyfile}"; then fail "no HSTS with a private CA (it locks out devices that don't trust it)"; else pass "no HSTS header"; fi
 grep -qE 'reverse_proxy 127\.0\.0\.1:\{\$HTTP_PORT\}' "${caddyfile}" && grep -qE 'reverse_proxy 127\.0\.0\.1:\{\$WS_PORT\}' "${caddyfile}" \
   && grep -qE 'reverse_proxy 127\.0\.0\.1:3000' "${caddyfile}" && pass "upstreams are 127.0.0.1 only" || fail "Caddy upstreams should all be 127.0.0.1"
+grep -q 'if ! wallet_rpc_is_localhost; then' "${PROXY}/install.sh" && grep -q 'HTTP_ADDR=127.0.0.1' "${PROXY}/install.sh" \
+  && pass "installer reminds to close plain RPC once wallets use HTTPS" || fail "proxy/install.sh should remind about HTTP_ADDR/WS_ADDR=127.0.0.1"
 awk '/@rpc \{/,/\}/' "${caddyfile}" | grep -q 'method POST OPTIONS' && awk '/@rpc \{/,/\}/' "${caddyfile}" | grep -qE 'path /$' \
   && pass "RPC route limited to POST/OPTIONS on /" || fail "RPC route should match only POST/OPTIONS on /"
 awk '/handle @rpc \{/,/^\t\}/' "${caddyfile}" | grep -qE 'header_up Host \{upstream_hostport\}' \
