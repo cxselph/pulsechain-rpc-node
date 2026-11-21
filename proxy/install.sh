@@ -141,3 +141,10 @@ echo ""
 echo "  Devices need a DNS record for ${host} pointing at this machine, and must trust"
 echo "  the CA that issued the certificate. Check everything: ./proxy/status.sh"
 echo ""
+if ! wallet_rpc_is_localhost; then
+  warn "Plain wallet RPC (http://<LAN IP>:${HTTP_PORT} and :${WS_PORT}) is still open on the LAN."
+  echo "  Once every wallet and app uses https://${host}, close it: set HTTP_ADDR=127.0.0.1 and"
+  echo "  WS_ADDR=127.0.0.1 in .env, then ./restart.sh. Caddy reaches the node on 127.0.0.1,"
+  echo "  so https://${host} keeps working (README \"Localhost-only mode\")."
+  echo ""
+fi

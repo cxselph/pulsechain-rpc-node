@@ -82,7 +82,7 @@ Web pages from other sites can't use the RPC: CORS allows no other origins, WebS
 
 The installer warns if the host itself has a public IP and UFW is not active. That is the typical VPS misconfiguration (an unauthenticated public RPC). Home machines behind NAT are fine.
 
-LAN binding is intentional so phones and other machines on the same network can use `http://YOUR_LAN_IP:8545`. To restrict access to the host only, set `HTTP_ADDR` / `WS_ADDR` in `.env` — see [Localhost-only mode](#localhost-only-mode).
+LAN binding is intentional so phones and other machines on the same network can use `http://YOUR_LAN_IP:8545`. To restrict access to the host only, set `HTTP_ADDR` / `WS_ADDR` in `.env` — see [Localhost-only mode](#localhost-only-mode). If you use the [HTTPS front end](#optional-https-front-end-httpsyour-host), do this once your wallets use `https://<host>`: the plain ports are then no longer needed.
 
 ---
 
@@ -289,6 +289,8 @@ What the installer does:
 
 To renew the certificate, run `./proxy/install.sh --cert new.pem --key new-key.pem`.
 
+**Close the plain RPC ports once everything uses HTTPS.** Caddy talks to go-pulse on `127.0.0.1`, so after every wallet and app has moved to `https://<host>`, nothing needs `http://<LAN IP>:8545` / `:8546` any more. Set `HTTP_ADDR=127.0.0.1` and `WS_ADDR=127.0.0.1` in `.env` and run `./restart.sh` (see [Localhost-only mode](#localhost-only-mode)); the installer reminds you while they're still open. Then only Caddy's 443 (limited to `LAN_ALLOW_FROM` by UFW) is reachable from other machines.
+
 ### Renewals pushed from another machine (optional)
 
 A Let's Encrypt certificate lasts 90 days or less, so copying it by hand doesn't scale. If another machine renews it (here: the NAS's certs container, which proves the domain through its DNS), it can push each renewal to the node over SSH:
@@ -463,7 +465,9 @@ Then apply:
 ./restart.sh
 ```
 
-Use `http://127.0.0.1:8545` in wallets on **that machine only**.
+Use `http://127.0.0.1:8545` in wallets on **that machine only**, or the [HTTPS front end](#optional-https-front-end-httpsyour-host) (`https://<host>`) from other devices: Caddy connects to `127.0.0.1`, so it keeps working in this mode. The control page and the monitoring exporter also use `127.0.0.1`.
+
+To open plain RPC to the LAN again, remove the two lines (or set them to `0.0.0.0`) and run `./restart.sh`. If UFW is active, `./install.sh` limits 8545/8546 to `LAN_ALLOW_FROM`.
 
 ### LAN beacon API (optional)
 
