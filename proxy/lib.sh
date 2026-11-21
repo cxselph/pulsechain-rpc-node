@@ -64,11 +64,15 @@ proxy_checks() {
     echo "FAIL wallet WebSocket wss://${host} -> HTTP ${code:-none}"; failed=1
   fi
 
-  body="$("${c[@]}" "${base}/" || true)"
-  if [[ "${body}" == *"https://${host}"* ]]; then
+  # "/" is the control page when it's running (signed out, it redirects to /login),
+  # and the static landing page (which shows https://<host>) when it isn't.
+  body="$("${c[@]}" -w '\n%{http_code} %{redirect_url}' "${base}/" || true)"
+  if [[ "${body##*$'\n'}" =~ ^30[1278]\ .*/login$ ]]; then
+    echo "ok   control page ${base}/ (sign-in)"
+  elif [[ "${body}" == *"https://${host}"* ]]; then
     echo "ok   landing page ${base}/"
   else
-    echo "FAIL landing page ${base}/"; failed=1
+    echo "FAIL control page / landing page ${base}/ -> ${body##*$'\n'}"; failed=1
   fi
 
   if curl -fsS -m 3 http://127.0.0.1:3000/grafana/api/health >/dev/null 2>&1; then

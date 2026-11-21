@@ -61,6 +61,7 @@ awk '/@rpc \{/,/\}/' "${caddyfile}" | grep -q 'method POST OPTIONS' && awk '/@rp
 awk '/handle @rpc \{/,/^\t\}/' "${caddyfile}" | grep -qE 'header_up Host \{upstream_hostport\}' \
   && pass "RPC upstream gets an IP Host header (passes go-pulse --http.vhosts)" || fail "RPC route should send header_up Host {upstream_hostport}"
 grep -q '{{.Host}}' "${PROXY}/site/index.html" && pass "landing page shows the hostname" || fail "landing page should template {{.Host}}"
+grep -qF '.*/login$ ]]' "${PROXY}/lib.sh" && pass "status accepts the control page sign-in redirect at /" || fail "proxy_checks should accept the control page redirecting / to /login"
 
 # --- Certificate validator (cert_problems) ----------------------------------------
 tmp="$(mktemp -d)"; trap 'rm -rf "${tmp}"' EXIT
